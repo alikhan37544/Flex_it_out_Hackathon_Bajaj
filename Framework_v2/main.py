@@ -2,6 +2,8 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import os
+import collections
+from mediapipe.framework.formats import landmark_pb2
 
 from motion_detector import MotionDetector
 from thumbs_up import is_thumbs_up
@@ -35,6 +37,12 @@ def get_hand_region(cx, cy, frame_width, frame_height, grid_size=3):
     row = cy // cell_height
     return f"{chr(65 + int(col))}{int(row) + 1}"
 
+def overlay_text(frame, text, position, font_scale=0.8, color=(255, 255, 255), thickness=2):
+    """
+    Overlays text on the given frame at the specified position.
+    """
+    cv2.putText(frame, text, position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -62,6 +70,7 @@ while True:
 
     if results.multi_hand_landmarks:
         for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+            hand_label = handedness.classification[0].label
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
             
             # Calculate the hand center (average of landmarks) for motion and region detection.
@@ -80,7 +89,7 @@ while True:
             # Check gestures in priority order.
             if motion_gesture:
                 gesture_text = motion_gesture
-            elif is_thumbs_up(hand_landmarks):
+            elif is_thumbs_up(hand_landmarks) and not is_closed_fist(hand_landmarks):
                 gesture_text = "Thumbs Up"
             elif is_peace_sign(hand_landmarks):
                 gesture_text = "Peace Sign"
@@ -92,7 +101,7 @@ while True:
                 gesture_text = "Unknown Gesture"
 
             # Determine if the hand is left or right.
-            if handedness.classification[0].label == 'Left':
+            if hand_label == 'Left':
                 gesture_text_left = gesture_text
                 region_text_left = region_text
             else:
@@ -100,14 +109,10 @@ while True:
                 region_text_right = region_text
 
     # Overlay gesture and region info on the frame.
-    cv2.putText(frame, f"Left Hand Gesture: {gesture_text_left}", (10, frame_height - 60),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.putText(frame, f"Left Hand Region: {region_text_left}", (10, frame_height - 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.putText(frame, f"Right Hand Gesture: {gesture_text_right}", (10, frame_height - 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-    cv2.putText(frame, f"Right Hand Region: {region_text_right}", (10, frame_height - 120),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
+    overlay_text(frame, f"Left Hand Gesture: {gesture_text_left}", (10, frame_height - 60))
+    overlay_text(frame, f"Left Hand Region: {region_text_left}", (10, frame_height - 30))
+    overlay_text(frame, f"Right Hand Gesture: {gesture_text_right}", (10, frame_height - 90))
+    overlay_text(frame, f"Right Hand Region: {region_text_right}", (10, frame_height - 120))
 
     cv2.imshow("Hand Gesture Tracking", frame)
     if cv2.waitKey(1) & 0xFF == 27:  # Press 'Esc' to exit.
