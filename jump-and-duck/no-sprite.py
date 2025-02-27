@@ -11,7 +11,7 @@ os.environ["QT_QPA_PLATFORM"] = "xcb"
 action = "none"  # "jump", "duck", or "none"
 
 # ---------------------------
-# Pose detection using OpenCV & MediaPipe (tracking head and body)
+# Pose detection using OpenCV & MediaPipe (tracking head and upper body with dynamic baseline)
 # ---------------------------
 def pose_detection():
     global action
@@ -19,7 +19,7 @@ def pose_detection():
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-    # Define landmarks representing head and torso.
+    # Use only upper-body landmarks.
     key_landmarks = [
         mp_pose.PoseLandmark.NOSE,
         mp_pose.PoseLandmark.LEFT_EYE,
@@ -28,30 +28,32 @@ def pose_detection():
         mp_pose.PoseLandmark.RIGHT_EAR,
         mp_pose.PoseLandmark.LEFT_SHOULDER,
         mp_pose.PoseLandmark.RIGHT_SHOULDER,
-        mp_pose.PoseLandmark.LEFT_HIP,
-        mp_pose.PoseLandmark.RIGHT_HIP,
     ]
 
-    # Thresholds in pixels.
-    jump_threshold = 20   # if average goes up (i.e. smaller y) by >20 px, trigger jump
-    duck_threshold = 20   # if average goes down (i.e. larger y) by >20 px, trigger duck
+    # Thresholds (in pixels)
+    jump_threshold = 20   # if average is at least 20px above baseline -> jump
+    duck_threshold = 20   # if average is at least 20px below baseline -> duck
+    alpha = 0.01          # smoothing factor for dynamic baseline update
+
+    baseline = None
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        # Flip for mirror view and convert to RGB.
+        # Flip frame for mirror view and convert to RGB.
         frame = cv2.flip(frame, 1)
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image)
 
-        # Use the current frame height to define the baseline as the vertical midpoint.
         h, w, _ = frame.shape
-        baseline_avg = h / 2  # standing baseline set to middle of the capture
+
+        # Initialize baseline to the vertical midpoint if not set.
+        if baseline is None:
+            baseline = h / 2
 
         if results.pose_landmarks:
-            # Compute the average y (in pixels) of the key landmarks.
             total_y = 0
             count = 0
             for landmark in key_landmarks:
@@ -60,14 +62,25 @@ def pose_detection():
                 count += 1
             current_avg = total_y / count
 
-            # Compare current average to the baseline.
-            diff = baseline_avg - current_avg  # positive diff: body raised.
+            # Calculate difference between the current average and the baseline.
+            diff = baseline - current_avg  # Positive: body raised (jump)
+
+            # Always update baseline to adapt over time.
+            baseline = (1 - alpha) * baseline + alpha * current_avg
+
+            # Determine action based on the difference.
             if diff > jump_threshold:
                 action = "jump"
             elif diff < -duck_threshold:
                 action = "duck"
             else:
                 action = "none"
+
+
+        # Draw the dynamic baseline line and its value on the camera feed.
+        cv2.line(frame, (0, int(baseline)), (w, int(baseline)), (0, 255, 0), 2)
+        cv2.putText(frame, f"Baseline: {int(baseline)}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
         cv2.imshow("Webcam (Press Q to exit)", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -186,6 +199,7 @@ def main():
                 dino.velocity_y = dino.jump_speed
             dino.is_ducking = (action == "duck")
             dino.update()
+
             spawn_timer += 1
             if spawn_timer > 60:
                 if random.random() < 0.3:
@@ -193,6 +207,7 @@ def main():
                 else:
                     obstacles.append(Obstacle(SCREEN_WIDTH, current_speed))
                 spawn_timer = 0
+
             for obs in obstacles:
                 obs.speed = current_speed
                 obs.update()
@@ -206,6 +221,7 @@ def main():
         for obs in obstacles:
             obs.draw(screen)
         pygame.draw.line(screen, (0, 0, 0), (0, GROUND_Y), (SCREEN_WIDTH, GROUND_Y), 2)
+
         font = pygame.font.SysFont(None, 36)
         score_text = font.render(f"Score: {score}", True, (0, 0, 0))
         screen.blit(score_text, (600, 20))
@@ -213,6 +229,7 @@ def main():
             over_text = font.render("Game Over! Press Q to Quit", True, (255, 0, 0))
             screen.blit(over_text, (200, 200))
         pygame.display.flip()
+
         if game_over:
             keys = pygame.key.get_pressed()
             if keys[pygame.K_q]:
