@@ -4,12 +4,14 @@ import pygame
 import sys
 import random
 import threading
+import os
+os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 # Global action variable used by the game loop.
 action = "none"  # "jump", "duck", or "none"
 
 # ---------------------------
-# Pose detection using OpenCV & MediaPipe
+# Pose detection using OpenCV & MediaPipe (dynamic change in y)
 # ---------------------------
 def pose_detection():
     global action
@@ -17,42 +19,37 @@ def pose_detection():
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-    baseline_set = False
-    baseline_sum = 0
-    frame_count = 0
-    baseline_y = None
+    prev_nose_y = None
+    jump_threshold = 20   # If nose goes up by more than this many pixels (compared to previous frame), trigger jump
+    duck_threshold = 20   # If nose goes down by more than this many pixels, trigger duck
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
-        # Flip frame for a mirror view and convert color
+        # Flip frame for mirror view and convert color.
         frame = cv2.flip(frame, 1)
         image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = pose.process(image)
 
         if results.pose_landmarks:
-            # Using the NOSE landmark as a proxy for head position.
+            # Use the NOSE landmark as a proxy for head position.
             nose = results.pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
             h, w, _ = frame.shape
             nose_y = nose.y * h
 
-            if not baseline_set:
-                baseline_sum += nose_y
-                frame_count += 1
-                if frame_count >= 30:  # use first 30 frames to compute baseline
-                    baseline_y = baseline_sum / frame_count
-                    baseline_set = True
-                    print("Baseline head position (y):", baseline_y)
+            if prev_nose_y is None:
+                prev_nose_y = nose_y
             else:
-                # Determine action based on deviation from the baseline.
-                if baseline_y - nose_y > 30:  # Head raised => jump
+                diff = prev_nose_y - nose_y  # Positive diff: head is higher than previous frame.
+                if diff > jump_threshold:
                     action = "jump"
-                elif nose_y - baseline_y > 30:  # Head lowered => duck
+                elif diff < -duck_threshold:
                     action = "duck"
                 else:
                     action = "none"
+                prev_nose_y = nose_y
 
         cv2.imshow("Webcam (Press Q to exit)", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -98,7 +95,7 @@ class Dino:
             self.height = 50
 
     def draw(self, screen):
-        # For now, draw a simple green rectangle
+        # Draw a simple green rectangle
         color = (0, 128, 0)
         pygame.draw.rect(screen, color, (self.x, self.y - self.height, self.width, self.height))
 
@@ -129,19 +126,16 @@ class Obstacle:
 class Crow:
     def __init__(self, x, speed):
         self.x = x
-        # For the crow, we want it to fly at a height that forces you to duck.
-        # When standing, Dino's top is at GROUND_Y - 50. When ducking, top is at GROUND_Y - 30.
-        # We'll position the crow so its bottom is around 260.
+        # Position the crow to force a duck action.
         self.width = 30
         self.height = 20
-        self.bottom = 260  # The bottom position of the crow
+        self.bottom = 260  # bottom position of the crow
         self.speed = speed
 
     def update(self):
         self.x -= self.speed
 
     def draw(self, screen):
-        # Draw crow as a black rectangle
         color = (0, 0, 0)
         pygame.draw.rect(screen, color, (self.x, self.bottom - self.height, self.width, self.height))
 
@@ -181,7 +175,6 @@ def main():
                 sys.exit()
 
         if not game_over:
-            # Update speed based on score every 300 points.
             current_speed = base_speed + (score // 300)
 
             # Trigger jump if action is "jump" and dino is not already jumping.
@@ -194,37 +187,30 @@ def main():
 
             dino.update()
 
-            # Spawn obstacles at regular intervals.
+            # Spawn obstacles at intervals.
             spawn_timer += 1
             if spawn_timer > 60:
-                # Randomly choose between ground obstacle (70%) and crow (30%)
                 if random.random() < 0.3:
                     obstacles.append(Crow(SCREEN_WIDTH, current_speed))
                 else:
                     obstacles.append(Obstacle(SCREEN_WIDTH, current_speed))
                 spawn_timer = 0
 
-            # Update obstacles and check for collisions.
             for obs in obstacles:
-                # Update the obstacle's speed to current speed.
                 obs.speed = current_speed
                 obs.update()
                 if obs.collides_with(dino):
                     game_over = True
-            # Remove obstacles that have moved off screen.
             obstacles = [obs for obs in obstacles if not obs.off_screen()]
 
             score += 1
 
-        # Drawing section
-        screen.fill((255, 255, 255))  # white background
+        screen.fill((255, 255, 255))
         dino.draw(screen)
         for obs in obstacles:
             obs.draw(screen)
-        # Draw ground line
         pygame.draw.line(screen, (0, 0, 0), (0, GROUND_Y), (SCREEN_WIDTH, GROUND_Y), 2)
 
-        # Display score
         font = pygame.font.SysFont(None, 36)
         score_text = font.render(f"Score: {score}", True, (0, 0, 0))
         screen.blit(score_text, (600, 20))
@@ -244,7 +230,7 @@ def main():
 # Start the pose detection thread and launch the game
 # ---------------------------
 if __name__ == "__main__":
-    # Start the pose detection in a separate thread (daemon so it closes with the main program)
+    # Start pose detection in a separate thread.
     cv_thread = threading.Thread(target=pose_detection, daemon=True)
     cv_thread.start()
     main()
