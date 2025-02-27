@@ -5,9 +5,6 @@ import sys
 import random
 import threading
 
-# Import our sprite classes from sprites.py
-from sprites import SpriteSheet, Dino, Obstacle, Crow
-
 # Global action variable used by the game loop.
 action = "none"  # "jump", "duck", or "none"
 
@@ -16,7 +13,7 @@ action = "none"  # "jump", "duck", or "none"
 # ---------------------------
 def pose_detection():
     global action
-    cap = cv2.VideoCapture(0)
+    cap = cv2.VideoCapture(1)
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
@@ -65,12 +62,100 @@ def pose_detection():
     cv2.destroyAllWindows()
 
 # ---------------------------
-# Screen settings
+# Game classes using Pygame
 # ---------------------------
+# Screen settings
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 400
 GROUND_Y = 300
 
+class Dino:
+    def __init__(self):
+        self.x = 50
+        self.y = GROUND_Y
+        self.width = 40
+        self.height = 50
+        self.velocity_y = 0
+        self.is_jumping = False
+        self.is_ducking = False
+        self.jump_speed = -15  # initial upward speed
+        self.gravity = 1
+
+    def update(self):
+        # Jumping physics
+        if self.is_jumping:
+            self.velocity_y += self.gravity
+            self.y += self.velocity_y
+            if self.y >= GROUND_Y:
+                self.y = GROUND_Y
+                self.is_jumping = False
+                self.velocity_y = 0
+
+        # Change hitbox if ducking (only when not jumping)
+        if self.is_ducking and not self.is_jumping:
+            self.height = 30
+        else:
+            self.height = 50
+
+    def draw(self, screen):
+        # For now, draw a simple green rectangle
+        color = (0, 128, 0)
+        pygame.draw.rect(screen, color, (self.x, self.y - self.height, self.width, self.height))
+
+class Obstacle:
+    def __init__(self, x, speed):
+        self.x = x
+        self.y = GROUND_Y
+        self.width = 20
+        self.height = random.randint(30, 50)
+        self.speed = speed
+
+    def update(self):
+        self.x -= self.speed
+
+    def draw(self, screen):
+        # Draw obstacle as a red rectangle
+        color = (128, 0, 0)
+        pygame.draw.rect(screen, color, (self.x, self.y - self.height, self.width, self.height))
+
+    def off_screen(self):
+        return self.x + self.width < 0
+
+    def collides_with(self, dino):
+        dino_rect = pygame.Rect(dino.x, dino.y - dino.height, dino.width, dino.height)
+        obs_rect = pygame.Rect(self.x, self.y - self.height, self.width, self.height)
+        return dino_rect.colliderect(obs_rect)
+
+class Crow:
+    def __init__(self, x, speed):
+        self.x = x
+        # For the crow, we want it to fly at a height that forces you to duck.
+        # When standing, Dino's top is at GROUND_Y - 50. When ducking, top is at GROUND_Y - 30.
+        # We'll position the crow so its bottom is around 260.
+        self.width = 30
+        self.height = 20
+        self.bottom = 260  # The bottom position of the crow
+        self.speed = speed
+
+    def update(self):
+        self.x -= self.speed
+
+    def draw(self, screen):
+        # Draw crow as a black rectangle
+        color = (0, 0, 0)
+        pygame.draw.rect(screen, color, (self.x, self.bottom - self.height, self.width, self.height))
+
+    def off_screen(self):
+        return self.x + self.width < 0
+
+    def collides_with(self, dino):
+        dino_rect = pygame.Rect(dino.x, dino.y - dino.height, dino.width, dino.height)
+        crow_rect = pygame.Rect(self.x, self.bottom - self.height, self.width, self.height)
+        return dino_rect.colliderect(crow_rect)
+
+# ---------------------------
+# Main game loop using Pygame
+# ---------------------------
 def main():
     global action
     pygame.init()
@@ -78,20 +163,15 @@ def main():
     pygame.display.set_caption("Jump & Duck Game")
     clock = pygame.time.Clock()
 
-    # Load the sprite sheet.
-    # Change "assets_spritesheet.png" to your actual sprite sheet filename.
-    sheet = SpriteSheet("200-offline-sprite.png")
-
-    # Create the sprite-based Dino.
-    dino = Dino(sheet)
-
+    dino = Dino()
     obstacles = []
     spawn_timer = 0
     score = 0
     game_over = False
+
     base_speed = 5
 
-    # Main game loop.
+    # Game loop
     while True:
         clock.tick(30)  # 30 FPS
 
@@ -101,31 +181,33 @@ def main():
                 sys.exit()
 
         if not game_over:
-            # Increase obstacle speed gradually.
+            # Update speed based on score every 300 points.
             current_speed = base_speed + (score // 300)
 
-            # Pose-controlled actions.
+            # Trigger jump if action is "jump" and dino is not already jumping.
             if action == "jump" and not dino.is_jumping:
                 dino.is_jumping = True
                 dino.velocity_y = dino.jump_speed
+
+            # Set ducking state if action is "duck".
             dino.is_ducking = (action == "duck")
 
-            # Update the dino's state (animation and physics).
             dino.update()
 
-            # Spawn new obstacles at regular intervals.
+            # Spawn obstacles at regular intervals.
             spawn_timer += 1
             if spawn_timer > 60:
-                # 30% chance to spawn a crow (flying obstacle) vs ground obstacle.
+                # Randomly choose between ground obstacle (70%) and crow (30%)
                 if random.random() < 0.3:
-                    obstacles.append(Crow(sheet, SCREEN_WIDTH, current_speed))
+                    obstacles.append(Crow(SCREEN_WIDTH, current_speed))
                 else:
-                    obstacles.append(Obstacle(sheet, SCREEN_WIDTH, current_speed))
+                    obstacles.append(Obstacle(SCREEN_WIDTH, current_speed))
                 spawn_timer = 0
 
             # Update obstacles and check for collisions.
             for obs in obstacles:
-                obs.speed = current_speed  # update speed based on score
+                # Update the obstacle's speed to current speed.
+                obs.speed = current_speed
                 obs.update()
                 if obs.collides_with(dino):
                     game_over = True
@@ -134,15 +216,15 @@ def main():
 
             score += 1
 
-        # Drawing section.
+        # Drawing section
         screen.fill((255, 255, 255))  # white background
         dino.draw(screen)
         for obs in obstacles:
             obs.draw(screen)
-        # Draw the ground line.
+        # Draw ground line
         pygame.draw.line(screen, (0, 0, 0), (0, GROUND_Y), (SCREEN_WIDTH, GROUND_Y), 2)
 
-        # Display the score.
+        # Display score
         font = pygame.font.SysFont(None, 36)
         score_text = font.render(f"Score: {score}", True, (0, 0, 0))
         screen.blit(score_text, (600, 20))
@@ -158,8 +240,11 @@ def main():
                 pygame.quit()
                 sys.exit()
 
+# ---------------------------
+# Start the pose detection thread and launch the game
+# ---------------------------
 if __name__ == "__main__":
-    # Start pose detection in a separate thread (daemonized so it exits with the main program)
+    # Start the pose detection in a separate thread (daemon so it closes with the main program)
     cv_thread = threading.Thread(target=pose_detection, daemon=True)
     cv_thread.start()
     main()
