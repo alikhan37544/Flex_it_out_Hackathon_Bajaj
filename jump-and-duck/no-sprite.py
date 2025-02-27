@@ -11,7 +11,7 @@ os.environ["QT_QPA_PLATFORM"] = "xcb"
 action = "none"  # "jump", "duck", or "none"
 
 # ---------------------------
-# Pose detection using OpenCV & MediaPipe (dynamic change in y)
+# Pose detection using OpenCV & MediaPipe (tracking head and body)
 # ---------------------------
 def pose_detection():
     global action
@@ -19,9 +19,28 @@ def pose_detection():
     mp_pose = mp.solutions.pose
     pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 
-    prev_nose_y = None
-    jump_threshold = 20   # If nose goes up by more than this many pixels (compared to previous frame), trigger jump
-    duck_threshold = 20   # If nose goes down by more than this many pixels, trigger duck
+    # Variables for baseline calibration using selected landmarks:
+    baseline_set = False
+    baseline_sum = 0
+    frame_count = 0
+    baseline_avg = None  # In pixel units
+
+    # Indices for landmarks representing head and torso:
+    key_landmarks = [
+        mp_pose.PoseLandmark.NOSE,
+        mp_pose.PoseLandmark.LEFT_EYE,
+        mp_pose.PoseLandmark.RIGHT_EYE,
+        mp_pose.PoseLandmark.LEFT_EAR,
+        mp_pose.PoseLandmark.RIGHT_EAR,
+        mp_pose.PoseLandmark.LEFT_SHOULDER,
+        mp_pose.PoseLandmark.RIGHT_SHOULDER,
+        mp_pose.PoseLandmark.LEFT_HIP,
+        mp_pose.PoseLandmark.RIGHT_HIP,
+    ]
+
+    # Thresholds in pixels.
+    jump_threshold = 20   # If average goes up (i.e. smaller y) by more than this, trigger jump.
+    duck_threshold = 20   # If average goes down (i.e. larger y) by more than this, trigger duck.
 
     while True:
         ret, frame = cap.read()
@@ -34,22 +53,36 @@ def pose_detection():
         results = pose.process(image)
 
         if results.pose_landmarks:
-            # Use the NOSE landmark as a proxy for head position.
-            nose = results.pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
             h, w, _ = frame.shape
-            nose_y = nose.y * h
 
-            if prev_nose_y is None:
-                prev_nose_y = nose_y
+            # Calculate the average y of selected landmarks (converted to pixels).
+            total_y = 0
+            count = 0
+            for landmark in key_landmarks:
+                lm = results.pose_landmarks.landmark[landmark]
+                total_y += lm.y * h
+                count += 1
+            current_avg = total_y / count
+
+            # During calibration phase, average over first 30 frames.
+            if not baseline_set:
+                baseline_sum += current_avg
+                frame_count += 1
+                if frame_count >= 30:
+                    baseline_avg = baseline_sum / frame_count
+                    baseline_set = True
+                    print("Baseline average y (standing):", baseline_avg)
             else:
-                diff = prev_nose_y - nose_y  # Positive diff: head is higher than previous frame.
+                # Calculate difference relative to baseline.
+                diff = baseline_avg - current_avg
+                # If diff is positive, current_avg is lower than baseline (body raised => jump)
                 if diff > jump_threshold:
                     action = "jump"
+                # If diff is negative, current_avg is higher than baseline (body dropped => duck)
                 elif diff < -duck_threshold:
                     action = "duck"
                 else:
                     action = "none"
-                prev_nose_y = nose_y
 
         cv2.imshow("Webcam (Press Q to exit)", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -126,7 +159,6 @@ class Obstacle:
 class Crow:
     def __init__(self, x, speed):
         self.x = x
-        # Position the crow to force a duck action.
         self.width = 30
         self.height = 20
         self.bottom = 260  # bottom position of the crow
