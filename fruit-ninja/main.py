@@ -3,6 +3,8 @@ import mediapipe as mp
 import pygame
 import random
 import math
+import os
+os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 # -------------------------------
 # Helper Functions and Classes
@@ -25,7 +27,6 @@ def line_circle_collision(A, B, circle_center, radius):
     ACx = cx - x1
     ACy = cy - y1
 
-    # Project AC onto AB, computing parameter t along AB.
     ab2 = ABx**2 + ABy**2
     if ab2 == 0:
         return False  # Avoid division by zero.
@@ -61,8 +62,7 @@ class Fruit:
         self.vy += gravity * dt
 
     def draw(self, screen):
-        # For image assets, use:
-        # screen.blit(self.image, (int(self.x - self.radius), int(self.y - self.radius)))
+        # For image assets, use screen.blit() instead.
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
 
 class Bomb(Fruit):
@@ -74,8 +74,7 @@ class Bomb(Fruit):
         # self.image = pygame.transform.scale(self.image, (2*self.radius, 2*self.radius))
 
     def draw(self, screen):
-        # For image assets, use:
-        # screen.blit(self.image, (int(self.x - self.radius), int(self.y - self.radius)))
+        # For image assets, use screen.blit() instead.
         pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
         pygame.draw.circle(screen, (255, 0, 0), (int(self.x), int(self.y)), self.radius, 2)
 
@@ -103,10 +102,11 @@ def spawn_bomb(screen_width, screen_height, multiplier):
 
 def main():
     mp_hands = mp.solutions.hands
+    mp_draw = mp.solutions.drawing_utils
     hands = mp_hands.Hands(min_detection_confidence=0.7,
                            min_tracking_confidence=0.5)
 
-    cap = cv2.VideoCapture(10)
+    cap = cv2.VideoCapture(1)  # Change to 0 if needed.
     if not cap.isOpened():
         print("Error: Could not open webcam.")
         return
@@ -118,20 +118,29 @@ def main():
 
     pygame.init()
     screen = pygame.display.set_mode((screen_width, screen_height))
-    pygame.display.set_caption("Fruit Ninja with Hand Tracking")
+    pygame.display.set_caption("Fruit Ninja with Whole Hand Tracking")
     clock = pygame.time.Clock()
 
     score = 0
     fruits = []
     spawn_timer = 0.0
-    slice_threshold = 40  # Minimum movement (pixels) to register a slice.
-    prev_smoothed_tip = None  # Previous smoothed index finger tip.
-    slicing_line = None
     game_time = 0.0  # Total game time.
 
-    # Smoothing factor for the finger tracking (0 < alpha <= 1)
+    # Smoothing factor for hand centroid (0 < alpha <= 1)
     alpha = 0.3
-    smoothed_tip = None
+
+    # Variables for hand centroid and in-game pointer.
+    hand_centroid = None      # Smoothed hand centroid (from raw landmarks).
+    prev_hand_centroid = None # Previous smoothed hand centroid.
+    game_pointer = None       # In-game pointer that moves faster.
+    scaling_factor = 1.5      # 1x hand movement produces 1.5x in-game movement.
+
+    # Trail for swipe: maintain a list of recent game_pointer positions.
+    trail_points = []
+    max_trail_length = 5  # Adjust for a longer/shorter trail.
+
+    # Lower swipe threshold for increased sensitivity.
+    slice_threshold = 15
 
     running = True
     while running:
@@ -149,46 +158,79 @@ def main():
         ret, frame = cap.read()
         if not ret:
             continue
+
+        # Flip and convert frame.
         frame = cv2.flip(frame, 1)
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = hands.process(frame_rgb)
 
-        # Get raw index finger tip position.
-        raw_tip = None
+        # Draw landmarks on the frame for a separate "Hand Detection" window.
+        if results.multi_hand_landmarks:
+            for handLms in results.multi_hand_landmarks:
+                mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
+        cv2.imshow("Hand Detection", frame)
+        cv2.waitKey(1)
+
+        # Compute the centroid of the whole hand.
+        raw_pointer = None
         if results.multi_hand_landmarks:
             handLms = results.multi_hand_landmarks[0]
             h, w, _ = frame.shape
-            index_tip = handLms.landmark[mp_hands.HandLandmark.INDEX_FINGER_TIP]
-            raw_tip = (int(index_tip.x * w), int(index_tip.y * h))
+            sum_x, sum_y, count = 0, 0, 0
+            for lm in handLms.landmark:
+                sum_x += lm.x
+                sum_y += lm.y
+                count += 1
+            avg_x = int((sum_x / count) * w)
+            avg_y = int((sum_y / count) * h)
+            raw_pointer = (avg_x, avg_y)
 
-        # Apply exponential smoothing to reduce zigzag jitter.
-        if raw_tip:
-            if smoothed_tip is None:
-                smoothed_tip = raw_tip
+        # Apply exponential smoothing to the raw pointer.
+        if raw_pointer:
+            if hand_centroid is None:
+                hand_centroid = raw_pointer
             else:
-                smoothed_tip = (
-                    int(alpha * raw_tip[0] + (1 - alpha) * smoothed_tip[0]),
-                    int(alpha * raw_tip[1] + (1 - alpha) * smoothed_tip[1])
+                hand_centroid = (
+                    int(alpha * raw_pointer[0] + (1 - alpha) * hand_centroid[0]),
+                    int(alpha * raw_pointer[1] + (1 - alpha) * hand_centroid[1])
                 )
         else:
-            smoothed_tip = None
+            hand_centroid = None
 
-        # Determine slicing gesture using smoothed coordinates.
+        # Update the in-game pointer using the change in the hand centroid.
+        if hand_centroid:
+            if game_pointer is None:
+                game_pointer = hand_centroid
+            else:
+                if prev_hand_centroid:
+                    # Compute displacement from the hand centroid change.
+                    dx = hand_centroid[0] - prev_hand_centroid[0]
+                    dy = hand_centroid[1] - prev_hand_centroid[1]
+                    # Scale the displacement.
+                    scaled_dx = dx * scaling_factor
+                    scaled_dy = dy * scaling_factor
+                    game_pointer = (int(game_pointer[0] + scaled_dx), int(game_pointer[1] + scaled_dy))
+            prev_hand_centroid = hand_centroid
+        else:
+            game_pointer = None
+
+        # Add current game_pointer to the trail.
+        if game_pointer:
+            trail_points.append(game_pointer)
+            if len(trail_points) > max_trail_length:
+                trail_points.pop(0)
+
+        # Determine the most recent swipe segment.
         slicing_line = None
-        if prev_smoothed_tip and smoothed_tip:
-            dx = smoothed_tip[0] - prev_smoothed_tip[0]
-            dy = smoothed_tip[1] - prev_smoothed_tip[1]
-            distance = math.hypot(dx, dy)
-            if distance > slice_threshold:
-                slicing_line = (prev_smoothed_tip, smoothed_tip)
-        prev_smoothed_tip = smoothed_tip
+        if len(trail_points) >= 2:
+            slicing_line = (trail_points[-2], trail_points[-1])
 
         # Update fruits and bombs.
         for obj in fruits:
             obj.update(dt)
         fruits = [obj for obj in fruits if obj.y - obj.radius < screen_height]
 
-        # Check for collision with slicing line.
+        # Check for collision using the swipe segment.
         if slicing_line:
             A, B = slicing_line
             for obj in fruits:
@@ -198,6 +240,19 @@ def main():
                         score -= 1
                     else:
                         score += 1
+
+        # Additionally, if the in-game pointer directly touches any fruit.
+        if game_pointer:
+            for obj in fruits:
+                if not obj.sliced:
+                    dist = math.hypot(game_pointer[0] - obj.x, game_pointer[1] - obj.y)
+                    if dist <= obj.radius:
+                        obj.sliced = True
+                        if obj.is_bomb:
+                            score -= 1
+                        else:
+                            score += 1
+
         fruits = [obj for obj in fruits if not obj.sliced]
 
         spawn_timer += dt
@@ -208,16 +263,22 @@ def main():
             else:
                 fruits.append(spawn_bomb(screen_width, screen_height, multiplier))
 
+        # Draw game elements.
         screen.fill((0, 0, 0))
         for obj in fruits:
             obj.draw(screen)
 
-        if slicing_line:
-            pygame.draw.line(screen, (0, 255, 0), slicing_line[0], slicing_line[1], 5)
+        # Draw the swipe trail (using anti-aliased lines for smoothness).
+        if len(trail_points) > 1:
+            pygame.draw.aalines(screen, (0, 255, 0), False, trail_points)
 
-        # Draw the (smoothed) index finger tip.
-        if smoothed_tip:
-            pygame.draw.circle(screen, (255, 0, 0), smoothed_tip, 10)
+        # Optionally, also draw the most recent segment thicker.
+        if slicing_line:
+            pygame.draw.line(screen, (0, 255, 0), slicing_line[0], slicing_line[1], 3)
+
+        # Draw the in-game pointer.
+        if game_pointer:
+            pygame.draw.circle(screen, (255, 0, 0), game_pointer, 10)
 
         font = pygame.font.SysFont(None, 36)
         score_text = font.render("Score: " + str(score), True, (255, 255, 255))
@@ -227,6 +288,7 @@ def main():
 
     cap.release()
     pygame.quit()
+    cv2.destroyAllWindows()
 
 if __name__ == '__main__':
     main()
