@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Fruit Ninja with MediaPipe Hands</title>
+    <style>
+      body {
+        margin: 0;
+        background: #222;
+        color: #fff;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      #container {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      canvas {
+        background: #000;
+        margin: 10px;
+      }
+      /* Hide the video element (we use it only for input) */
+      #videoElement {
+        display: none;
+      }
+      #startButton {
+        font-size: 20px;
+        padding: 10px 20px;
+        margin-top: 20%;
+        cursor: pointer;
+      }
+    </style>
+  </head>
+  <body>
+    <button id="startButton">Start Game</button>
+    <!-- The hidden video element provides the webcam feed -->
+    <video id="videoElement" autoplay playsinline></video>
+    <div id="container">
+      <!-- Canvas for game rendering -->
+      <canvas id="gameCanvas" width="640" height="480"></canvas>
+      <!-- Canvas for hand tracking display -->
+      <canvas id="handCanvas" width="640" height="480"></canvas>
+    </div>
+
+    <!-- Load MediaPipe Hands and Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+    <script>
+      // -------------------------------
+      // Global Variables and Canvas Setup
+      // -------------------------------
+      const videoElement = document.getElementById("videoElement");
+      const gameCanvas = document.getElementById("gameCanvas");
+      const gameCtx = gameCanvas.getContext("2d");
+      const handCanvas = document.getElementById("handCanvas");
+      const handCtx = handCanvas.getContext("2d");
+      const screenWidth = gameCanvas.width;
+      const screenHeight = gameCanvas.height;
+
+      // Global variable to hold the latest hand landmarks from MediaPipe Hands
+      let latestHandLandmarks = null;
+
+      // -------------------------------
+      // Set Up MediaPipe Hands
+      // -------------------------------
+      const hands = new Hands({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        },
+      });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.5,
+      });
+      hands.onResults(onResults);
+
+      // The onResults callback is called each time MediaPipe processes a frame.
+      // It stores the first hand's landmarks in a global variable and draws the hand tracking overlay.
+      function onResults(results) {
+        latestHandLandmarks = results.multiHandLandmarks
+          ? results.multiHandLandmarks[0]
+          : null;
+        handCtx.save();
+        handCtx.clearRect(0, 0, handCanvas.width, handCanvas.height);
+        // Draw the current video frame onto the hand tracking canvas.
+        handCtx.drawImage(
+          results.image,
+          0,
+          0,
+          handCanvas.width,
+          handCanvas.height
+        );
+        if (results.multiHandLandmarks) {
+          results.multiHandLandmarks.forEach((landmarks) => {
+            // Draw each landmark as a red circle.
+            landmarks.forEach((pt) => {
+              const x = pt.x * handCanvas.width;
+              const y = pt.y * handCanvas.height;
+              handCtx.beginPath();
+              handCtx.arc(x, y, 5, 0, 2 * Math.PI);
+              handCtx.fillStyle = "red";
+              handCtx.fill();
+            });
+          });
+        }
+        handCtx.restore();
+      }
+
+      // -------------------------------
+      // Set Up the Camera
+      // -------------------------------
+      let camera = null;
+      async function setupCamera() {
+        camera = new Camera(videoElement, {
+          onFrame: async () => {
+            await hands.send({ image: videoElement });
+          },
+          width: 640,
+          height: 480,
+        });
+        camera.start();
+      }
+
+      // -------------------------------
+      // Game Objects and Helper Functions
+      // -------------------------------
+      class Fruit {
+        constructor(x, y, radius, color, vx, vy) {
+          this.x = x;
+          this.y = y;
+          this.radius = radius;
+          this.color = color;
+          this.vx = vx; // horizontal velocity (pixels/second)
+          this.vy = vy; // vertical velocity (pixels/second)
+          this.sliced = false;
+          this.isBomb = false;
+        }
+        update(dt) {
+          this.x += this.vx * dt;
+          this.y += this.vy * dt;
+          const gravity = 500; // pixels per second^2
+          this.vy += gravity * dt;
+
+          // Bounce off left/right walls.
+          if (this.x - this.radius < 0) {
+            this.x = this.radius;
+            this.vx = -this.vx;
+          } else if (this.x + this.radius > screenWidth) {
+            this.x = screenWidth - this.radius;
+            this.vx = -this.vx;
+          }
+        }
+        draw(ctx) {
+          ctx.beginPath();
+          ctx.fillStyle = this.color;
+          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      }
+
+      class Bomb extends Fruit {
+        constructor(x, y, radius, vx, vy) {
+          super(x, y, radius, "#000", vx, vy);
+          this.isBomb = true;
+        }
+        draw(ctx) {
+          ctx.beginPath();
+          ctx.fillStyle = this.color;
+          ctx.arc(this.x, this.y, this.radius, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = "#f00";
+          ctx.stroke();
+        }
+      }
+
+      // Spawn functions now clamp x between radius and screenWidth - radius.
+      function spawnFruit(screenWidth, screenHeight, multiplier) {
+        const radius = Math.random() * 10 + 20; // 20 to 30
+        // Ensure the fruit spawns completely inside the display area.
+        const x = Math.random() * (screenWidth - 2 * radius) + radius;
+        const y = screenHeight + 50;
+        const color = `rgb(${Math.floor(
+          Math.random() * 156 + 100
+        )},${Math.floor(Math.random() * 156 + 100)},${Math.floor(
+          Math.random() * 156 + 100
+        )})`;
+        // Reduce speed by multiplying velocities by 0.5.
+        const vx = (Math.random() * 200 - 100) * multiplier * 0.5;
+        const vy = (Math.random() * -200 - 400) * multiplier * 0.5;
+        return new Fruit(x, y, radius, color, vx, vy);
+      }
+
+      function spawnBomb(screenWidth, screenHeight, multiplier) {
+        const radius = Math.random() * 10 + 20;
+        const x = Math.random() * (screenWidth - 2 * radius) + radius;
+        const y = screenHeight + 50;
+        const vx = (Math.random() * 200 - 100) * multiplier * 0.5;
+        const vy = (Math.random() * -200 - 400) * multiplier * 0.5;
+        return new Bomb(x, y, radius, vx, vy);
+      }
+
+      function lineCircleCollision(A, B, circleCenter, radius) {
+        const [x1, y1] = A;
+        const [x2, y2] = B;
+        const [cx, cy] = circleCenter;
+        const ABx = x2 - x1;
+        const ABy = y2 - y1;
+        const ACx = cx - x1;
+        const ACy = cy - y1;
+        const ab2 = ABx * ABx + ABy * ABy;
+        if (ab2 === 0) return false;
+        let t = (ACx * ABx + ACy * ABy) / ab2;
+        t = Math.max(0, Math.min(1, t));
+        const closestX = x1 + t * ABx;
+        const closestY = y1 + t * ABy;
+        const dist = Math.hypot(closestX - cx, closestY - cy);
+        return dist <= radius;
+      }
+
+      // -------------------------------
+      // Game Variables
+      // -------------------------------
+      let score = 0;
+      let fruits = [];
+      // Set spawnTimer initial value to 1.0 so fruit spawns immediately.
+      let spawnTimer = 1.0;
+      let gameTime = 0.0;
+
+      // Hand tracking and pointer variables
+      let pointerAlpha = 0.3;
+      let handCentroid = null;
+      let prevHandCentroid = null;
+      let gamePointer = null;
+      // Pointer speed scaling.
+      const scalingFactor = 1.0;
+      const trailPoints = [];
+      const maxTrailLength = 5;
+      let lastTime = null;
+
+      // -------------------------------
+      // Main Game Loop
+      // -------------------------------
+      function gameLoop(timestamp) {
+        if (!lastTime) lastTime = timestamp;
+        const dt = (timestamp - lastTime) / 1000;
+        lastTime = timestamp;
+        gameTime += dt;
+        spawnTimer += dt;
+        let multiplier = 1 + gameTime / 120;
+        multiplier = Math.min(multiplier, 2.0);
+
+        // Process hand tracking from latest MediaPipe results.
+        if (latestHandLandmarks) {
+          let sumX = 0,
+            sumY = 0,
+            count = 0;
+          latestHandLandmarks.forEach((pt) => {
+            sumX += pt.x * screenWidth;
+            sumY += pt.y * screenHeight;
+            count++;
+          });
+          // Invert the x-axis so that movements correspond to the real world.
+          const rawPointer = [screenWidth - sumX / count, sumY / count];
+          if (!handCentroid) {
+            handCentroid = rawPointer;
+          } else {
+            handCentroid = [
+              pointerAlpha * rawPointer[0] +
+                (1 - pointerAlpha) * handCentroid[0],
+              pointerAlpha * rawPointer[1] +
+                (1 - pointerAlpha) * handCentroid[1],
+            ];
+          }
+          if (!gamePointer) {
+            gamePointer = handCentroid;
+          } else if (prevHandCentroid) {
+            const dx = handCentroid[0] - prevHandCentroid[0];
+            const dy = handCentroid[1] - prevHandCentroid[1];
+            gamePointer = [
+              gamePointer[0] + dx * scalingFactor,
+              gamePointer[1] + dy * scalingFactor,
+            ];
+          }
+          prevHandCentroid = handCentroid;
+          trailPoints.push([...gamePointer]);
+          if (trailPoints.length > maxTrailLength) {
+            trailPoints.shift();
+          }
+        } else {
+          handCentroid = null;
+          gamePointer = null;
+        }
+
+        // Update fruits/bombs.
+        fruits.forEach((obj) => obj.update(dt));
+        fruits = fruits.filter((obj) => obj.y - obj.radius < screenHeight);
+
+        let slicingLine = null;
+        if (trailPoints.length >= 2) {
+          slicingLine = [
+            trailPoints[trailPoints.length - 2],
+            trailPoints[trailPoints.length - 1],
+          ];
+        }
+
+        if (slicingLine) {
+          const [A, B] = slicingLine;
+          fruits.forEach((obj) => {
+            if (
+              !obj.sliced &&
+              lineCircleCollision(A, B, [obj.x, obj.y], obj.radius)
+            ) {
+              obj.sliced = true;
+              if (obj.isBomb) {
+                score -= 1;
+              } else {
+                score += 1;
+              }
+            }
+          });
+        }
+
+        if (gamePointer) {
+          fruits.forEach((obj) => {
+            if (!obj.sliced) {
+              const dist = Math.hypot(
+                gamePointer[0] - obj.x,
+                gamePointer[1] - obj.y
+              );
+              if (dist <= obj.radius) {
+                obj.sliced = true;
+                if (obj.isBomb) {
+                  score -= 1;
+                } else {
+                  score += 1;
+                }
+              }
+            }
+          });
+        }
+        fruits = fruits.filter((obj) => !obj.sliced);
+
+        if (spawnTimer > 1.0) {
+          spawnTimer = 0.0;
+          if (Math.random() < 0.8) {
+            fruits.push(spawnFruit(screenWidth, screenHeight, multiplier));
+          } else {
+            fruits.push(spawnBomb(screenWidth, screenHeight, multiplier));
+          }
+        }
+
+        // Draw game elements.
+        gameCtx.clearRect(0, 0, screenWidth, screenHeight);
+        fruits.forEach((obj) => obj.draw(gameCtx));
+
+        if (trailPoints.length > 1) {
+          gameCtx.beginPath();
+          gameCtx.strokeStyle = "#0f0";
+          gameCtx.lineWidth = 2;
+          gameCtx.moveTo(trailPoints[0][0], trailPoints[0][1]);
+          for (let i = 1; i < trailPoints.length; i++) {
+            gameCtx.lineTo(trailPoints[i][0], trailPoints[i][1]);
+          }
+          gameCtx.stroke();
+        }
+        if (slicingLine) {
+          gameCtx.beginPath();
+          gameCtx.strokeStyle = "#0f0";
+          gameCtx.lineWidth = 4;
+          gameCtx.moveTo(slicingLine[0][0], slicingLine[0][1]);
+          gameCtx.lineTo(slicingLine[1][0], slicingLine[1][1]);
+          gameCtx.stroke();
+        }
+        if (gamePointer) {
+          gameCtx.beginPath();
+          gameCtx.fillStyle = "#f00";
+          gameCtx.arc(gamePointer[0], gamePointer[1], 10, 0, 2 * Math.PI);
+          gameCtx.fill();
+        }
+        gameCtx.font = "24px sans-serif";
+        gameCtx.fillStyle = "#fff";
+        gameCtx.fillText("Score: " + score, 10, 30);
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      // -------------------------------
+      // Initialization on User Interaction
+      // -------------------------------
+      async function initGame() {
+        await setupCamera();
+        requestAnimationFrame(gameLoop);
+      }
+
+      document.getElementById("startButton").addEventListener("click", () => {
+        document.getElementById("startButton").style.display = "none";
+        initGame();
+      });
+    </script>
+  </body>
+</html>
