@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dance Dance Dance - Improved</title>
+
+  <!-- p5.js for drawing and video capture -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.6.0/p5.min.js"></script>
+
+  <!-- MediaPipe Holistic and Drawing Utils -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/holistic/holistic.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <!-- Google Font -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" />
+
+  <style>
+    /* Reset some default margins/padding */
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Poppins', sans-serif;
+    }
+    body {
+      background: #111;
+      color: #EEE;
+      overflow: hidden;
+    }
+    #gameContainer {
+      position: relative;
+      width: 640px;
+      margin: 40px auto;
+      border: 3px solid #333;
+      box-shadow: 0 0 15px rgba(0, 255, 0, 0.3);
+      background: #222;
+    }
+    /* The p5.js canvas will go here */
+    #gameCanvas {
+      display: block;
+      margin: 0 auto;
+      outline: none;
+    }
+    /* Overlay UI container */
+    #overlayUI {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #444;
+    }
+    #overlayUI h1 {
+      margin-bottom: 8px;
+      font-size: 18px;
+      font-weight: 600;
+      text-align: center;
+    }
+    #overlayUI p {
+      font-size: 14px;
+      margin-bottom: 4px;
+      text-align: center;
+    }
+    /* Start / Stop Buttons */
+    .gameButton {
+      display: inline-block;
+      margin: 4px 2px;
+      padding: 8px 16px;
+      font-size: 14px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.3s;
+    }
+    .startBtn {
+      background: #28a745;
+      color: #fff;
+    }
+    .startBtn:hover {
+      background: #34d058;
+    }
+    .stopBtn {
+      background: #dc3545;
+      color: #fff;
+    }
+    .stopBtn:hover {
+      background: #ff4f5e;
+    }
+    .hide {
+      display: none !important;
+    }
+    /* Additional text styling over the game */
+    #statusText {
+      position: absolute;
+      top: 60px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid #444;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 600;
+      min-width: 300px;
+    }
+    #statusText span {
+      color: #0f0;
+    }
+    /* Audio element hidden */
+    audio {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameContainer">
+    <!-- Overlay UI with instructions and buttons -->
+    <div id="overlayUI">
+      <h1>Dance Dance Dance</h1>
+      <p>Wave over falling multipliers to boost your score.</p>
+      <button id="startBtn" class="gameButton startBtn">Start Game</button>
+      <button id="stopBtn" class="gameButton stopBtn hide">Stop Game</button>
+    </div>
+
+    <!-- p5.js canvas appended here -->
+  </div>
+
+  <!-- Optional status text area -->
+  <div id="statusText" class="hide"></div>
+
+  <!-- Hidden audio element with placeholder base64-encoded MP3
+       Replace the data URI below with your own audio if you wish -->
+  <audio id="bgMusic" loop>
+    <source src="data:audio/mp3;base64,//uQxAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAACcQCA/////wAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg" type="audio/mp3">
+    Your browser does not support the audio element.
+  </audio>
+
+  <script>
+    /* -----------------------------
+       Global variables & settings
+    ----------------------------- */
+    let video;
+    let canvas;
+    let ctx;
+    let offscreen;    // offscreen p5.Graphics for motion
+    let previousFrame; // p5.Image for previous frame
+
+    // MediaPipe holistic
+    let holistic;
+    let holisticResults = null;
+
+    // Game state
+    let gameRunning = false; // Toggled by Start/Stop buttons
+    let score = 0.0;
+    const scoreScaling = 0.005;
+    const movementThresholdValue = 30;
+    let musicState = "dance"; // "dance" or "freeze"
+    let danceDuration;       // ms
+    const freezeDuration = 5000;  // ms
+    let nextStateChangeTime = 0;
+    const bgMusic = document.getElementById("bgMusic");
+
+    // Multiplier tokens
+    class Multiplier {
+      constructor(x, y, value, radius=20, speed=3, createdTime=0) {
+        this.x = x;
+        this.y = y;
+        this.value = value;
+        this.radius = radius;
+        this.speed = speed;
+        this.collisionTime = 0;
+        this.createdTime = createdTime;
+      }
+      update() {
+        this.y += this.speed;
+      }
+    }
+    let multipliers = [];
+    const multiplierSpawnInterval = 3000; // ms
+    let lastMultiplierSpawnTime = 0;
+    const collisionActivationTime = 500; // ms
+    let activeMultiplierValue = 1.0;
+    let activeMultiplierTimer = 0; // ms
+    const activeMultiplierDuration = 5000; // ms
+    const tokenExpiryDuration = 7000; // ms
+
+    // Timing
+    let lastFrameTime = 0;
+
+    // UI references
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const statusText = document.getElementById("statusText");
+
+    /* -----------------------------
+       p5.js setup
+    ----------------------------- */
+    function setup() {
+      // Create p5.js canvas
+      canvas = createCanvas(640, 480);
+      canvas.id("gameCanvas");
+      // Append it to our container
+      canvas.parent("gameContainer");
+      ctx = canvas.elt.getContext("2d");
+
+      // Create video capture
+      video = createCapture(VIDEO);
+      video.size(640, 480);
+      video.hide();
+
+      // Offscreen for motion
+      offscreen = createGraphics(640, 480);
+      offscreen.pixelDensity(1);
+
+      // Initialize previousFrame
+      previousFrame = createImage(640, 480);
+
+      // Setup MediaPipe Holistic
+      holistic = new Holistic({
+        locateFile: (file) => {
+          return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+        }
+      });
+      holistic.setOptions({
+        modelComplexity: 1,
+        smoothLandmarks: true,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+      });
+      holistic.onResults(results => {
+        holisticResults = results;
+      });
+
+      // Hide status text initially
+      statusText.classList.add("hide");
+
+      // No loop until user clicks start
+      noLoop();
+    }
+
+    /* -----------------------------
+       p5.js draw
+    ----------------------------- */
+    function draw() {
+      background(30);
+
+      // Always show the mirrored video feed
+      push();
+      translate(width, 0);
+      scale(-1, 1);
+      image(video, 0, 0, width, height);
+      pop();
+
+      // If game is not running, skip the logic
+      if (!gameRunning) {
+        return;
+      }
+
+      let currentTime = millis();
+      let dt = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
+
+      // Offscreen for motion detection
+      offscreen.image(video, 0, 0, width, height);
+      offscreen.filter(BLUR, 3);
+      offscreen.loadPixels();
+      let currentPixels = offscreen.pixels;
+
+      // Compute difference with previous frame
+      let motion = 0;
+      let diffPixels = [];
+      if (previousFrame.pixels.length === currentPixels.length) {
+        previousFrame.loadPixels();
+        for (let i = 0; i < currentPixels.length; i += 4) {
+          let rDiff = abs(currentPixels[i]   - previousFrame.pixels[i]);
+          let gDiff = abs(currentPixels[i+1] - previousFrame.pixels[i+1]);
+          let bDiff = abs(currentPixels[i+2] - previousFrame.pixels[i+2]);
+          let avgDiff = (rDiff + gDiff + bDiff) / 3;
+          diffPixels.push(avgDiff);
+        }
+      }
+      // Save current frame
+      previousFrame.copy(offscreen, 0, 0, width, height, 0, 0, width, height);
+
+      // Determine bounding box from pose landmarks
+      let bbox = null;
+      if (holisticResults && holisticResults.poseLandmarks) {
+        let xs = holisticResults.poseLandmarks.map(lm => lm.x * width);
+        let ys = holisticResults.poseLandmarks.map(lm => lm.y * height);
+        let x_min = constrain(min(xs) - 20, 0, width);
+        let x_max = constrain(max(xs) + 20, 0, width);
+        let y_min = constrain(min(ys) - 20, 0, height);
+        let y_max = constrain(max(ys) + 20, 0, height);
+        bbox = { x_min, x_max, y_min, y_max };
+        // Draw bounding box
+        noFill();
+        stroke(0, 255, 0);
+        strokeWeight(2);
+        rect(bbox.x_min, bbox.y_min, x_max - x_min, y_max - y_min);
+      }
+
+      // (Optional) draw some landmarks for debugging
+      if (holisticResults && holisticResults.poseLandmarks) {
+        noFill();
+        stroke(255, 0, 0);
+        strokeWeight(2);
+        for (let lm of holisticResults.poseLandmarks) {
+          let x = lm.x * width;
+          let y = lm.y * height;
+          ellipse(x, y, 4, 4);
+        }
+      }
+
+      // Music State Management
+      if (currentTime >= nextStateChangeTime) {
+        if (musicState === "dance") {
+          bgMusic.pause();
+          musicState = "freeze";
+          nextStateChangeTime = currentTime + freezeDuration;
+        } else {
+          bgMusic.play().catch(()=>{});
+          musicState = "dance";
+          danceDuration = random(20, 30) * 1000;
+          nextStateChangeTime = currentTime + danceDuration;
+        }
+      }
+
+      // Spawn Multipliers
+      if (currentTime - lastMultiplierSpawnTime > multiplierSpawnInterval) {
+        let spawnX = random(30, width-30);
+        let multiplierValue = random([1.5, 2, 3]);
+        multipliers.push(new Multiplier(spawnX, -20, multiplierValue, 20, random(3, 6), currentTime));
+        lastMultiplierSpawnTime = currentTime;
+      }
+
+      // Update multipliers
+      for (let i = multipliers.length - 1; i >= 0; i--) {
+        let m = multipliers[i];
+        m.update();
+        // Remove if offscreen or expired
+        if (m.y - m.radius > height || (currentTime - m.createdTime) > tokenExpiryDuration) {
+          multipliers.splice(i, 1);
+          continue;
+        }
+        // Check collision with bounding box
+        if (bbox && m.x >= bbox.x_min && m.x <= bbox.x_max && m.y >= bbox.y_min && m.y <= bbox.y_max) {
+          // Sample motion around token
+          let sampleSize = 20;
+          let colCount = 0;
+          let startX = floor(constrain(m.x - sampleSize/2, 0, width-1));
+          let startY = floor(constrain(m.y - sampleSize/2, 0, height-1));
+          let endX = floor(constrain(m.x + sampleSize/2, 0, width-1));
+          let endY = floor(constrain(m.y + sampleSize/2, 0, height-1));
+          for (let y = startY; y < endY; y++) {
+            for (let x = startX; x < endX; x++) {
+              let index = (y * width + x);
+              if (diffPixels[index] > movementThresholdValue) {
+                colCount++;
+              }
+            }
+          }
+          if (colCount > 50) {
+            m.collisionTime += dt;
+          } else {
+            m.collisionTime = 0;
+          }
+          // Show collision progress
+          let progress = constrain((m.collisionTime / collisionActivationTime) * 100, 0, 100);
+          noStroke();
+          fill(0, 255, 255);
+          textSize(14);
+          textAlign(CENTER);
+          text(`${floor(progress)}%`, m.x, m.y - 30);
+
+          // Activate multiplier
+          if (m.collisionTime >= collisionActivationTime) {
+            activeMultiplierValue = m.value;
+            activeMultiplierTimer = activeMultiplierDuration;
+            multipliers.splice(i, 1);
+          }
+        } else {
+          m.collisionTime = 0;
+        }
+        // Draw token
+        noFill();
+        stroke(0, 255, 0);
+        strokeWeight(3);
+        ellipse(m.x, m.y, m.radius*2);
+        noStroke();
+        fill(0, 255, 0);
+        textSize(16);
+        textAlign(CENTER, CENTER);
+        text(`x${m.value}`, m.x, m.y);
+      }
+
+      // Manage active multiplier
+      if (activeMultiplierTimer > 0) {
+        activeMultiplierTimer -= dt;
+        fill(0, 255, 0);
+        noStroke();
+        textSize(18);
+        textAlign(LEFT);
+        text(`Multiplier Active: x${activeMultiplierValue} (${(activeMultiplierTimer/1000).toFixed(1)}s)`, 10, 110);
+      } else {
+        activeMultiplierValue = 1.0;
+      }
+
+      // Calculate movement in bounding box
+      let movementCount = 0;
+      if (bbox && diffPixels.length > 0) {
+        for (let y = bbox.y_min; y < bbox.y_max; y++) {
+          for (let x = bbox.x_min; x < bbox.x_max; x++) {
+            let idx = (y * width + x);
+            if (diffPixels[idx] > movementThresholdValue) {
+              movementCount++;
+            }
+          }
+        }
+      }
+      // Update score
+      if (musicState === "dance") {
+        score += movementCount * scoreScaling * activeMultiplierValue;
+      } else {
+        score -= movementCount * scoreScaling;
+      }
+      score = max(score, 0);
+
+      // UI overlays
+      fill(255);
+      noStroke();
+      textSize(20);
+      textAlign(LEFT);
+      text(`Score: ${score.toFixed(2)}`, 10, 30);
+
+      textAlign(CENTER);
+      textSize(28);
+      if (musicState === "dance") {
+        fill(0, 255, 0);
+        text("Dance Dance Dance", width/2, 50);
+      } else {
+        fill(255, 0, 0);
+        text("Freeze Freeze Freeze", width/2, 50);
+      }
+
+      // Progress bar
+      let maxScore = 1000;
+      let barWidth = map(score, 0, maxScore, 0, width);
+      noStroke();
+      fill(0, 255, 0);
+      rect(0, height - 30, barWidth, 30);
+      stroke(255);
+      noFill();
+      rect(0, height - 30, width, 30);
+    }
+
+    /* -----------------------------
+       Start & Stop Game
+    ----------------------------- */
+    startBtn.addEventListener("click", () => {
+      // Start or resume the game
+      if (!gameRunning) {
+        gameRunning = true;
+        loop();
+        // Setup times
+        lastFrameTime = millis();
+        danceDuration = random(20, 30) * 1000;
+        nextStateChangeTime = millis() + danceDuration;
+        lastMultiplierSpawnTime = millis();
+
+        // Attempt to play audio
+        bgMusic.play().catch(() => {});
+        musicState = "dance";
+
+        // Show status text
+        statusText.innerText = "Game Running!";
+        statusText.classList.remove("hide");
+
+        // Button visibility
+        startBtn.classList.add("hide");
+        stopBtn.classList.remove("hide");
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      if (gameRunning) {
+        gameRunning = false;
+        noLoop();
+        bgMusic.pause();
+
+        // Show status text
+        statusText.innerText = "Game Paused!";
+        statusText.classList.remove("hide");
+
+        // Button visibility
+        stopBtn.classList.add("hide");
+        startBtn.classList.remove("hide");
+      }
+    });
+
+    // Process frames for MediaPipe Holistic
+    function processHolistic() {
+      if (video.loadedmetadata) {
+        holistic.send({ image: video.elt });
+      }
+      requestAnimationFrame(processHolistic);
+    }
+    requestAnimationFrame(processHolistic);
+
+    // Optional: Quit game with 'q'
+    function keyPressed() {
+      if (key === 'q' || key === 'Q') {
+        noLoop();
+        bgMusic.pause();
+        remove();
+      }
+    }
+  </script>
+</body>
+</html>

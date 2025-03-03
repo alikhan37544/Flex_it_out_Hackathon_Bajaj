@@ -23,7 +23,7 @@ hands = mp_hands.Hands(max_num_hands=1,
 # Initialize our motion detector.
 motion_detector = MotionDetector(velocity_threshold=0.05, acceleration_threshold=0.02, buffer_size=5)
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(10)
 
 def get_hand_region(cx, cy, frame_width, frame_height, region_size=100):
     regions = {

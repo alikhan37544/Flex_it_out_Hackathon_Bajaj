@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sit-up Counter | AI Fitness Tracker</title>
+    <!-- Load TensorFlow.js -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <!-- Load PoseNet model -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/posenet"></script>
+    <!-- Load font awesome for icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Google fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header section -->
+        <header>
+            <div class="logo">
+                <i class="fas fa-dumbbell pulse"></i>
+                <h1>FitTrack<span>AI</span></h1>
+            </div>
+            <nav>
+                <button class="nav-btn active" data-section="workout">Workout</button>
+                <button class="nav-btn" data-section="stats">Stats</button>
+                <button class="nav-btn" data-section="settings">Settings</button>
+            </nav>
+        </header>
+
+        <!-- Main content sections -->
+        <main>
+            <!-- Workout section (default active) -->
+            <section id="workout" class="active-section">
+                <div class="workout-container">
+                    <!-- Camera view and pose detection -->
+                    <div class="camera-container">
+                        <div class="video-overlay">
+                            <div class="counter-display">
+                                <span id="sit-up-count">0</span>
+                                <span class="counter-label">SIT-UPS</span>
+                            </div>
+                            <div class="rep-indicator" id="rep-indicator">
+                                <div class="rep-status">Get Ready</div>
+                                <div class="rep-progress">
+                                    <div class="progress-bar"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <video id="video" playsinline></video>
+                        <canvas id="output"></canvas>
+                        <div class="camera-controls">
+                            <button id="start-camera" class="control-btn">
+                                <i class="fas fa-video"></i> Start Camera
+                            </button>
+                            <button id="start-tracking" class="control-btn" disabled>
+                                <i class="fas fa-play"></i> Start Tracking
+                            </button>
+                            <button id="reset-counter" class="control-btn" disabled>
+                                <i class="fas fa-redo"></i> Reset
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Instruction panel -->
+                    <div class="instruction-panel">
+                        <h2>Sit-up Exercise Guide</h2>
+                        <div class="instruction-step">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <h3>Starting Position</h3>
+                                <p>Lie on your back with knees bent and feet flat on the floor. Place your hands behind your head or across your chest.</p>
+                            </div>
+                        </div>
+                        <div class="instruction-step">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <h3>Execution</h3>
+                                <p>Contract your abdominal muscles to lift your upper body toward your knees until your elbows or chest reach your thighs.</p>
+                            </div>
+                        </div>
+                        <div class="instruction-step">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <h3>Return</h3>
+                                <p>Slowly lower your upper body back to the starting position while maintaining tension in your core.</p>
+                            </div>
+                        </div>
+                        
+                        <div class="form-tips">
+                            <h3><i class="fas fa-lightbulb"></i> Form Tips</h3>
+                            <ul>
+                                <li>Keep your movements controlled and smooth</li>
+                                <li>Avoid pulling on your neck with your hands</li>
+                                <li>Maintain proper breathing - exhale as you rise, inhale as you lower</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Stats section -->
+            <section id="stats">
+                <div class="stats-container">
+                    <h2>Your Workout Statistics</h2>
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-fire"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Today's Sit-ups</h3>
+                                <div class="stat-value" id="today-count">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Weekly Total</h3>
+                                <div class="stat-value" id="weekly-count">0</div>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-trophy"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h3>Personal Best</h3>
+                                <div class="stat-value" id="best-count">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="history-chart">
+                        <h3>Weekly Progress</h3>
+                        <div class="chart-container">
+                            <canvas id="weekly-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Settings section -->
+            <section id="settings">
+                <div class="settings-container">
+                    <h2>Settings</h2>
+                    <div class="settings-group">
+                        <h3>Detection Settings</h3>
+                        <div class="setting-item">
+                            <label for="detection-confidence">Minimum Detection Confidence</label>
+                            <input type="range" id="detection-confidence" min="0.1" max="1.0" step="0.1" value="0.5">
+                            <span id="confidence-value">0.5</span>
+                        </div>
+                        <div class="setting-item">
+                            <label for="rep-threshold">Sit-up Detection Sensitivity</label>
+                            <input type="range" id="rep-threshold" min="10" max="40" step="5" value="25">
+                            <span id="threshold-value">25°</span>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <h3>Display Settings</h3>
+                        <div class="setting-item toggle">
+                            <label for="show-skeleton">Show Skeleton</label>
+                            <label class="switch">
+                                <input type="checkbox" id="show-skeleton" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="setting-item toggle">
+                            <label for="show-angles">Show Joint Angles</label>
+                            <label class="switch">
+                                <input type="checkbox" id="show-angles" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="setting-item toggle">
+                            <label for="mirror-mode">Mirror Mode</label>
+                            <label class="switch">
+                                <input type="checkbox" id="mirror-mode" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group">
+                        <h3>Audio Settings</h3>
+                        <div class="setting-item toggle">
+                            <label for="audio-feedback">Audio Feedback</label>
+                            <label class="switch">
+                                <input type="checkbox" id="audio-feedback" checked>
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                        <div class="setting-item toggle">
+                            <label for="voice-guide">Voice Guidance</label>
+                            <label class="switch">
+                                <input type="checkbox" id="voice-guide">
+                                <span class="slider round"></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer>
+            <p>FitTrackAI - AI-Powered Fitness Tracking</p>
+            <div class="footer-links">
+                <a href="#" class="footer-link">Privacy</a>
+                <a href="#" class="footer-link">Terms</a>
+                <a href="#" class="footer-link">Help</a>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Modal for camera permissions -->
+    <div class="modal" id="permission-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Camera Access Required</h2>
+                <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+                <p>This app needs access to your camera to detect and count sit-ups. Your video stream is processed locally and is not stored or transmitted.</p>
+                <button id="grant-permission" class="primary-btn">Allow Camera Access</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading overlay -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="spinner"></div>
+        <p>Loading AI Model...</p>
+    </div>
+
+    <!-- Audio elements -->
+    <audio id="rep-complete-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-positive-interface-beep-221.mp3" preload="auto"></audio>
+    <audio id="milestone-sound" src="https://assets.mixkit.co/sfx/preview/mixkit-achievement-bell-600.mp3" preload="auto"></audio>
+
+    <!-- Chart.js for statistics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Custom JS -->
+    <script src="script.js"></script>
+</body>
+</html>

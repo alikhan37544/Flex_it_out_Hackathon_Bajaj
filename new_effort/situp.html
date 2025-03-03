@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sit-Up Counter with Pose Detection</title>
+  <style>
+    :root {
+      --primary: #4361ee;
+      --secondary: #3a0ca3;
+      --success: #4cc9f0;
+      --warning: #f72585;
+      --dark: #1f1f1f;
+      --light: #f8f9fa;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    
+    body {
+      background: linear-gradient(135deg, var(--dark), #2d2d2d);
+      color: var(--light);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow-x: hidden;
+    }
+    
+    .container {
+      width: 100%;
+      max-width: 1200px;
+      padding: 2rem;
+      margin: 0 auto;
+    }
+    
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+      position: relative;
+      width: 100%;
+      padding: 1.5rem;
+      background: rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(10px);
+      border-radius: 0 0 20px 20px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+    }
+    
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 0.5rem;
+      background: linear-gradient(to right, var(--success), var(--primary));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      animation: gradient 8s ease infinite;
+      background-size: 200% auto;
+    }
+    
+    @keyframes gradient {
+      0% {
+        background-position: 0% 50%;
+      }
+      50% {
+        background-position: 100% 50%;
+      }
+      100% {
+        background-position: 0% 50%;
+      }
+    }
+    
+    .subtitle {
+      font-size: 1.2rem;
+      opacity: 0.8;
+      margin-bottom: 1rem;
+    }
+    
+    .main {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+    }
+    
+    .canvas-container {
+      position: relative;
+      width: 100%;
+      max-width: 800px;
+      margin: 0 auto;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      background: rgba(29, 29, 29, 0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    #output-canvas {
+      width: 100%;
+      height: auto;
+      display: block;
+      background-color: #1a1a1a;
+    }
+    
+    .metrics {
+      display: flex;
+      justify-content: space-around;
+      width: 100%;
+      max-width: 800px;
+      margin: 2rem auto;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    .metric-card {
+      flex: 1;
+      min-width: 200px;
+      background: rgba(29, 29, 29, 0.7);
+      backdrop-filter: blur(10px);
+      border-radius: 15px;
+      padding: 1.5rem;
+      text-align: center;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      transition: all 0.3s ease;
+    }
+    
+    .metric-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+    }
+    
+    .metric-value {
+      font-size: 3rem;
+      font-weight: bold;
+      margin: 0.5rem 0;
+      background: linear-gradient(45deg, var(--primary), var(--success));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+    
+    .metric-label {
+      font-size: 1rem;
+      opacity: 0.8;
+    }
+    
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      margin: 2rem 0;
+      flex-wrap: wrap;
+    }
+    
+    .btn {
+      padding: 0.8rem 1.5rem;
+      border: none;
+      border-radius: 50px;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    .btn-primary {
+      background: linear-gradient(45deg, var(--primary), var(--secondary));
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 15px rgba(67, 97, 238, 0.4);
+    }
+    
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--light);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .btn-secondary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 15px rgba(0, 0, 0, 0.3);
+      background: rgba(255, 255, 255, 0.15);
+    }
+    
+    .status {
+      padding: 1rem;
+      border-radius: 10px;
+      margin: 1rem 0;
+      text-align: center;
+      font-weight: bold;
+      width: 100%;
+      max-width: 800px;
+      background: rgba(29, 29, 29, 0.7);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .status.ready {
+      background: rgba(76, 201, 240, 0.1);
+      color: var(--success);
+      border: 1px solid rgba(76, 201, 240, 0.3);
+    }
+    
+    .status.error {
+      background: rgba(247, 37, 133, 0.1);
+      color: var(--warning);
+      border: 1px solid rgba(247, 37, 133, 0.3);
+    }
+    
+    .status.counting {
+      background: rgba(67, 97, 238, 0.1);
+      color: var(--primary);
+      border: 1px solid rgba(67, 97, 238, 0.3);
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0% {
+        box-shadow: 0 0 0 0 rgba(67, 97, 238, 0.4);
+      }
+      70% {
+        box-shadow: 0 0 0 10px rgba(67, 97, 238, 0);
+      }
+      100% {
+        box-shadow: 0 0 0 0 rgba(67, 97, 238, 0);
+      }
+    }
+    
+    .angle-guide {
+      margin-top: 2rem;
+      width: 100%;
+      max-width: 800px;
+      background: rgba(29, 29, 29, 0.7);
+      backdrop-filter: blur(10px);
+      border-radius: 15px;
+      padding: 1.5rem;
+      box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .angle-guide h3 {
+      text-align: center;
+      margin-bottom: 1rem;
+      color: var(--success);
+    }
+    
+    .angle-info {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+    }
+    
+    .angle-bar {
+      height: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .angle-progress {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--primary), var(--success));
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    
+    .spinner {
+      width: 80px;
+      height: 80px;
+      border: 8px solid rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+      border-top-color: var(--primary);
+      animation: spin 1s ease-in-out infinite;
+      margin-bottom: 2rem;
+    }
+    
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    
+    .loading-text {
+      font-size: 1.5rem;
+      text-align: center;
+    }
+    
+    .loading-progress {
+      margin-top: 1rem;
+      width: 80%;
+      max-width: 300px;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    
+    .loading-bar {
+      height: 100%;
+      width: 0;
+      background: linear-gradient(90deg, var(--primary), var(--success));
+      border-radius: 5px;
+      transition: width 0.3s ease;
+    }
+    
+    footer {
+      margin-top: auto;
+      width: 100%;
+      text-align: center;
+      padding: 1.5rem;
+      font-size: 0.9rem;
+      opacity: 0.7;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    
+    @media (max-width: 768px) {
+      .container {
+        padding: 1rem;
+      }
+      
+      h1 {
+        font-size: 2rem;
+      }
+      
+      .metric-card {
+        min-width: 140px;
+      }
+    }
+    
+    /* Animations */
+    .fade-in {
+      animation: fadeIn 0.5s ease-in forwards;
+    }
+    
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    
+    .video-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading overlay -->
+  <div class="loading-overlay" id="loading-overlay">
+    <div class="spinner"></div>
+    <div class="loading-text">Loading Pose Detection Models...</div>
+    <div class="loading-progress">
+      <div class="loading-bar" id="loading-bar"></div>
+    </div>
+  </div>
+
+  <header>
+    <h1>Sit-Up Counter</h1>
+    <p class="subtitle">AI-powered exercise tracker with real-time feedback</p>
+  </header>
+
+  <div class="container">
+    <div class="main">
+      <div class="status" id="status">Loading pose detection model...</div>
+      
+      <div class="canvas-container">
+        <canvas id="output-canvas"></canvas>
+      </div>
+      
+      <video id="video" class="video-hidden" autoplay playsinline></video>
+      
+      <div class="metrics">
+        <div class="metric-card fade-in" style="animation-delay: 0.1s">
+          <div class="metric-label">Sit-Ups Completed</div>
+          <div class="metric-value" id="count-value">0</div>
+        </div>
+        <div class="metric-card fade-in" style="animation-delay: 0.2s">
+          <div class="metric-label">Form Quality</div>
+          <div class="metric-value" id="form-value">0%</div>
+        </div>
+        <div class="metric-card fade-in" style="animation-delay: 0.3s">
+          <div class="metric-label">Pace</div>
+          <div class="metric-value" id="pace-value">0</div>
+          <div class="metric-label">reps/min</div>
+        </div>
+      </div>
+      
+      <div class="angle-guide">
+        <h3>Angle Guide</h3>
+        <div class="angle-info">
+          <span>Hip Angle: <span id="hip-angle">0°</span></span>
+          <span id="hip-status">Not in position</span>
+        </div>
+        <div class="angle-bar">
+          <div class="angle-progress" id="hip-progress"></div>
+        </div>
+        
+        <div class="angle-info">
+          <span>Knee Angle: <span id="knee-angle">0°</span></span>
+          <span id="knee-status">Not in position</span>
+        </div>
+        <div class="angle-bar">
+          <div class="angle-progress" id="knee-progress"></div>
+        </div>
+      </div>
+      
+      <div class="controls">
+        <button class="btn btn-primary" id="start-btn">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="10 8 16 12 10 16 10 8"></polygon>
+          </svg>
+          Start Tracking
+        </button>
+        <button class="btn btn-secondary" id="reset-btn">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 1-9 9"></path>
+            <path d="M3 12a9 9 0 0 1 9-9"></path>
+            <path d="M21 12c0-4.97-4.03-9-9-9"></path>
+            <path d="M3 12c0 4.97 4.03 9 9 9"></path>
+            <path d="M12 7v5l3 3"></path>
+          </svg>
+          Reset Counter
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    AI-Powered Sit-Up Counter | Using MediaPipe Pose Detection
+  </footer>
+
+  <!-- Import libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow/4.2.0/tf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tensorflow-models/2.1.0/pose-detection/pose-detection.min.js"></script>
+  
+  <script>
+    // Global variables
+    let video, canvas, ctx;
+    let detector, poses = [];
+    let situpCount = 0;
+    let isInUpPosition = false;
+    let isInDownPosition = false;
+    let lastCountTime = 0;
+    let repTimes = [];
+    let formQuality = 0;
+    let isTracking = false;
+    const HIP_ANGLE_UP_THRESHOLD = 150; // Nearly straight
+    const HIP_ANGLE_DOWN_THRESHOLD = 90; // Bent at 90 degrees
+    const KNEE_ANGLE_THRESHOLD = 90; // Knees should be bent around 90 degrees
+    
+    // UI Elements
+    const startBtn = document.getElementById('start-btn');
+    const resetBtn = document.getElementById('reset-btn');
+    const countValue = document.getElementById('count-value');
+    const formValue = document.getElementById('form-value');
+    const paceValue = document.getElementById('pace-value');
+    const statusElement = document.getElementById('status');
+    const hipAngleElement = document.getElementById('hip-angle');
+    const kneeAngleElement = document.getElementById('knee-angle');
+    const hipStatusElement = document.getElementById('hip-status');
+    const kneeStatusElement = document.getElementById('knee-status');
+    const hipProgressElement = document.getElementById('hip-progress');
+    const kneeProgressElement = document.getElementById('knee-progress');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingBar = document.getElementById('loading-bar');
+    
+    // Initialize the application
+    async function init() {
+      try {
+        // Set up video and canvas
+        video = document.getElementById('video');
+        canvas = document.getElementById('output-canvas');
+        ctx = canvas.getContext('2d');
+        
+        // Set initial status
+        updateStatus('Loading models...', 'loading');
+        
+        // Load Pose model
+        await loadPoseDetection();
+        
+        // Request camera access
+        await setupCamera();
+        
+        // Update canvas dimensions based on video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Set up event listeners
+        setupEventListeners();
+        
+        // Update status
+        updateStatus('Ready to start. Click "Start Tracking" button.', 'ready');
+        hideLoading();
+        
+      } catch (error) {
+        console.error('Error initializing app:', error);
+        updateStatus(`Error: ${error.message}`, 'error');
+        hideLoading(true);
+      }
+    }
+    
+    // Progress tracking for loading
+    let loadingProgress = 0;
+    function updateLoadingProgress(value) {
+      loadingProgress = Math.min(100, value);
+      if (loadingBar) {
+        loadingBar.style.width = `${loadingProgress}%`;
+      }
+    }
+    
+    // Load the pose detection model
+    async function loadPoseDetection() {
+      updateLoadingProgress(10);
+      try {
+        // Use TensorFlow.js and PoseDetection
+        const poseDetection = window.poseDetection;
+        updateLoadingProgress(40);
+        
+        // Create detector
+        detector = await poseDetection.createDetector(
+          poseDetection.SupportedModels.BlazePose,
+          {
+            runtime: 'tfjs',
+            enableSmoothing: true,
+            modelType: 'full' // 'lite', 'full', or 'heavy'
+          }
+        );
+        
+        updateLoadingProgress(90);
+        console.log('Pose detector loaded successfully');
+      } catch (error) {
+        console.error('Error loading pose detection:', error);
+        throw new Error('Failed to load pose detection model. Please check your connection and try again.');
+      }
+    }
+    
+    // Set up camera access
+    async function setupCamera() {
+      updateLoadingProgress(95);
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+        
+        video.srcObject = stream;
+        
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => {
+            resolve();
+          };
+        });
+      } catch (error) {
+        console.error('Error accessing camera:', error);
+        throw new Error('Could not access the camera. Please grant camera permissions and try again.');
+      }
+    }
+    
+    // Set up event listeners
+    function setupEventListeners() {
+      startBtn.addEventListener('click', toggleTracking);
+      resetBtn.addEventListener('click', resetCounter);
+    }
+    
+    // Toggle tracking on/off
+    function toggleTracking() {
+      isTracking = !isTracking;
+      
+      if (isTracking) {
+        startBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="6" y="4" width="4" height="16"></rect>
+            <rect x="14" y="4" width="4" height="16"></rect>
+          </svg>
+          Pause Tracking
+        `;
+        updateStatus('Tracking sit-ups... Position yourself for the exercise.', 'counting');
+        detectPose();
+      } else {
+        startBtn.innerHTML = `
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="10 8 16 12 10 16 10 8"></polygon>
+          </svg>
+          Resume Tracking
+        `;
+        updateStatus('Tracking paused. Click "Resume Tracking" to continue.', 'ready');
+      }
+    }
+    
+    // Reset the counter and stats
+    function resetCounter() {
+      situpCount = 0;
+      isInUpPosition = false;
+      isInDownPosition = false;
+      lastCountTime = 0;
+      repTimes = [];
+      formQuality = 0;
+      
+      countValue.textContent = situpCount;
+      formValue.textContent = '0%';
+      paceValue.textContent = '0';
+      
+      updateStatus('Counter reset. Position yourself for the exercise.', isTracking ? 'counting' : 'ready');
+    }
+    
+    // Update status message
+    function updateStatus(message, type = null) {
+      statusElement.textContent = message;
+      statusElement.className = 'status';
+      
+      if (type) {
+        statusElement.classList.add(type);
+      }
+    }
+    
+    // Hide loading overlay
+    function hideLoading(error = false) {
+      updateLoadingProgress(100);
+      setTimeout(() => {
+        loadingOverlay.style.opacity = 0;
+        setTimeout(() => {
+          loadingOverlay.style.display = 'none';
+        }, 500);
+      }, error ? 0 : 1000);
+    }
+    
+    // Main pose detection loop
+    async function detectPose() {
+      if (!isTracking) return;
+      
+      try {
+        // Get poses from the detector
+        poses = await detector.estimatePoses(video);
+        
+        // Process the detected poses
+        if (poses && poses.length > 0) {
+          // Draw the video frame
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Process each detected person (usually just one)
+          poses.forEach(pose => {
+            // Draw the pose
+            drawPose(pose);
+            
+            // Analyze the exercise form
+            analyzeSitUpForm(pose);
+          });
+        }
+      } catch (error) {
+        console.error('Error in pose detection:', error);
+      }
+      
+      // Continue the detection loop
+      requestAnimationFrame(detectPose);
+    }
+    
+    // Draw the detected pose on the canvas
+    function drawPose(pose) {
+      const keypoints = pose.keypoints;
+      
+      // Draw body outline
+      drawBodyOutline(keypoints);
+      
+      // Draw the keypoints
+      keypoints.forEach(keypoint => {
+        if (keypoint.score > 0.5) {  // Only draw if confidence is high enough
+          ctx.fillStyle = getKeypointColor(keypoint.name);
+          ctx.beginPath();
+          ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Draw keypoint name for major joints
+          if (isImportantKeypoint(keypoint.name)) {
+            ctx.fillStyle = 'white';
+            ctx.font = '12px Arial';
+            ctx.fillText(formatKeypointName(keypoint.name), keypoint.x + 8, keypoint.y + 4);
+          }
+        }
+      });
+      
+      // Draw angle guides
+      drawAngleGuides(keypoints);
+    }
+    
+    // Draw body outline connecting the keypoints
+    function drawBodyOutline(keypoints) {
+      // Define the connections between keypoints for body outline
+      const connections = [
+        // Face
+        ['nose', 'left_eye'], ['nose', 'right_eye'],
+        ['left_eye', 'left_ear'], ['right_eye', 'right_ear'],
+        
+        // Shoulders
+        ['left_shoulder', 'right_shoulder'],
+        
+        // Arms
+        ['left_shoulder', 'left_elbow'], ['left_elbow', 'left_wrist'],
+        ['right_shoulder', 'right_elbow'], ['right_elbow', 'right_wrist'],
+        
+        // Torso
+        ['left_shoulder', 'left_hip'], ['right_shoulder', 'right_hip'],
+        ['left_hip', 'right_hip'],
+        
+        // Legs
+        ['left_hip', 'left_knee'], ['left_knee', 'left_ankle'],
+        ['right_hip', 'right_knee'], ['right_knee', 'right_ankle']
+      ];
+      
+      // Create a map for faster keypoint lookup
+      const keypointMap = {};
+      keypoints.forEach(keypoint => {
+        keypointMap[keypoint.name] = keypoint;
+      });
+      
+      // Draw connections
+      connections.forEach(([from, to]) => {
+        const fromKeypoint = keypointMap[from];
+        const toKeypoint = keypointMap[to];
+        
+        if (fromKeypoint && toKeypoint && 
+            fromKeypoint.score > 0.5 && toKeypoint.score > 0.5) {
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(fromKeypoint.x, fromKeypoint.y);
+          ctx.lineTo(toKeypoint.x, toKeypoint.y);
+          ctx.stroke();
+        }
+      });
+    }
+    
+    // Draw angle guides for the exercise
+    function drawAngleGuides(keypoints) {
+      // Get key keypoints for angle calculation
+      const leftShoulder = getKeypointByName(keypoints, 'left_shoulder');
+      const leftHip = getKeypointByName(keypoints, 'left_hip');
+      const leftKnee = getKeypointByName(keypoints, 'left_knee');
+      const leftAnkle = getKeypointByName(keypoints, 'left_ankle');
+      
+      // Calculate and draw hip angle
+      if (leftShoulder && leftHip && leftKnee) {
+        const hipAngle = calculateAngle(
+          leftShoulder.x, leftShoulder.y,
+          leftHip.x, leftHip.y,
+          leftKnee.x, leftKnee.y
+        );
+        
+        drawAngle(
+          leftShoulder.x, leftShoulder.y, 
+          leftHip.x, leftHip.y, 
+          leftKnee.x, leftKnee.y,
+          hipAngle,
+          isHipAngleInRange(hipAngle) ? 'rgba(76, 201, 240, 0.7)' : 'rgba(247, 37, 133, 0.7)'
+        );
+      }
+      
+      // Calculate and draw knee angle
+      if (leftHip && leftKnee && leftAnkle) {
+        const kneeAngle = calculateAngle(
+          leftHip.x, leftHip.y,
+          leftKnee.x, leftKnee.y,
+          leftAnkle.x, leftAnkle.y
+        );
+        
+        drawAngle(
+          leftHip.x, leftHip.y, 
+          leftKnee.x, leftKnee.y, 
+          leftAnkle.x, leftAnkle.y,
+          kneeAngle,
+          isKneeAngleInRange(kneeAngle) ? 'rgba(76, 201, 240, 0.7)' : 'rgba(247, 37, 133, 0.7)'
+        );
+      }
+    }
+    
+    // Draw an angle arc with text
+    function drawAngle(x1, y1, x2, y2, x3, y3, angle, color) {
+      // Draw arc representing the angle
+      const radius = 30;
+      const startAngle = Math.atan2(y1 - y2, x1 - x2);
+      const endAngle = Math.atan2(y3 - y2, x3 - x2);
+      
+      ctx.beginPath();
+      ctx.arc(x2, y2, radius, startAngle, endAngle, false);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      
+      // Draw angle text
+      const midAngle = (startAngle + endAngle) / 2;
+      const textX = x2 + (radius + 15) * Math.cos(midAngle);
+      const textY = y2 + (radius + 15) * Math.sin(midAngle);
+      
+      ctx.font = 'bold 16px Arial';
+      ctx.fillStyle = color;
+      ctx.fillText(`${Math.round(angle)}°`, textX, textY);
+    }
+    
+    // Analyze sit-up form and count reps
+    function analyzeSitUpForm(pose) {
+    const keypoints = pose.keypoints;
+    
+    // Get key keypoints for angle calculation
+    const leftShoulder = getKeypointByName(keypoints, 'left_shoulder');
+    const leftHip = getKeypointByName(keypoints, 'left_hip');
+    const leftKnee = getKeypointByName(keypoints, 'left_knee');
+    const leftAnkle = getKeypointByName(keypoints, 'left_ankle');
+    
+    // Check if we have the required keypoints
+    if (leftShoulder && leftHip && leftKnee && leftAnkle) {
+        // Calculate hip angle (between shoulder, hip, and knee)
+        const hipAngle = calculateAngle(
+        leftShoulder.x, leftShoulder.y,
+        leftHip.x, leftHip.y,
+        leftKnee.x, leftKnee.y
+        );
+        
+        // Calculate knee angle (between hip, knee, and ankle)
+        const kneeAngle = calculateAngle(
+        leftHip.x, leftHip.y,
+        leftKnee.x, leftKnee.y,
+        leftAnkle.x, leftAnkle.y
+        );
+        
+        // Update angle indicators in UI
+        updateAngleIndicators(hipAngle, kneeAngle);
+        
+        // Determine if the person is in the up position
+        const isInUpPositionNow = hipAngle > HIP_ANGLE_UP_THRESHOLD;
+        
+        // Determine if the person is in the down position
+        const isInDownPositionNow = hipAngle < HIP_ANGLE_DOWN_THRESHOLD && isKneeAngleInRange(kneeAngle);
+        
+        // Check for transition from down to up position (completed sit-up)
+        if (isInDownPosition && isInUpPositionNow) {
+        // Count the rep
+        situpCount++;
+        countValue.textContent = situpCount;
+        
+        // Track time for pace calculation
+        const now = Date.now();
+        if (lastCountTime > 0) {
+            const timeDiff = now - lastCountTime;
+            repTimes.push(timeDiff);
+            
+            // Keep only the last 5 reps for pace calculation
+            if (repTimes.length > 5) {
+            repTimes.shift();
+            }
+            
+            // Calculate pace (reps per minute)
+            const avgTimePerRep = repTimes.reduce((a, b) => a + b, 0) / repTimes.length;
+            const repsPerMinute = Math.round((60 * 1000) / avgTimePerRep);
+            paceValue.textContent = repsPerMinute;
+        }
+        lastCountTime = now;
+        
+        // Calculate form quality (based on angles)
+        updateFormQuality(hipAngle, kneeAngle);
+        
+        // Visual feedback for completed rep
+        flashFeedback('success');
+        }
+        
+        // Update position state
+        isInUpPosition = isInUpPositionNow;
+        isInDownPosition = isInDownPositionNow;
+    }
+    }
+
+    // Calculate angle between three points
+    function calculateAngle(x1, y1, x2, y2, x3, y3) {
+    // Calculate vectors
+    const vector1 = { x: x1 - x2, y: y1 - y2 };
+    const vector2 = { x: x3 - x2, y: y3 - y2 };
+    
+    // Calculate dot product
+    const dotProduct = vector1.x * vector2.x + vector1.y * vector2.y;
+    
+    // Calculate magnitudes
+    const magnitude1 = Math.sqrt(vector1.x * vector1.x + vector1.y * vector1.y);
+    const magnitude2 = Math.sqrt(vector2.x * vector2.x + vector2.y * vector2.y);
+    
+    // Calculate angle in radians
+    const angleRad = Math.acos(dotProduct / (magnitude1 * magnitude2));
+    
+    // Convert to degrees
+    const angleDeg = angleRad * (180 / Math.PI);
+    
+    return angleDeg;
+    }
+
+    // Get keypoint by name from the keypoints array
+    function getKeypointByName(keypoints, name) {
+    const keypoint = keypoints.find(kp => kp.name === name);
+    return keypoint && keypoint.score > 0.5 ? keypoint : null;
+    }
+
+    // Check if hip angle is in the correct range
+    function isHipAngleInRange(angle) {
+    return angle >= HIP_ANGLE_DOWN_THRESHOLD && angle <= HIP_ANGLE_UP_THRESHOLD;
+    }
+
+    // Check if knee angle is in the correct range
+    function isKneeAngleInRange(angle) {
+    const tolerance = 20; // Allow 20 degrees of tolerance
+    return Math.abs(angle - KNEE_ANGLE_THRESHOLD) <= tolerance;
+    }
+
+    // Update angle indicators in the UI
+    function updateAngleIndicators(hipAngle, kneeAngle) {
+    // Update hip angle display
+    hipAngleElement.textContent = `${Math.round(hipAngle)}°`;
+    
+    // Calculate hip angle percentage (for progress bar)
+    let hipPercentage = 0;
+    if (hipAngle <= HIP_ANGLE_DOWN_THRESHOLD) {
+        hipPercentage = 100; // Fully down
+    } else if (hipAngle >= HIP_ANGLE_UP_THRESHOLD) {
+        hipPercentage = 0; // Fully up
+    } else {
+        // Interpolate between down threshold and up threshold
+        hipPercentage = 100 - ((hipAngle - HIP_ANGLE_DOWN_THRESHOLD) / 
+                            (HIP_ANGLE_UP_THRESHOLD - HIP_ANGLE_DOWN_THRESHOLD) * 100);
+    }
+    hipProgressElement.style.width = `${hipPercentage}%`;
+    
+    // Update hip status text
+    if (hipAngle > HIP_ANGLE_UP_THRESHOLD) {
+        hipStatusElement.textContent = 'Up Position';
+        hipStatusElement.style.color = 'var(--success)';
+    } else if (hipAngle < HIP_ANGLE_DOWN_THRESHOLD) {
+        hipStatusElement.textContent = 'Down Position';
+        hipStatusElement.style.color = 'var(--primary)';
+    } else {
+        hipStatusElement.textContent = 'Transitioning';
+        hipStatusElement.style.color = 'var(--warning)';
+    }
+    
+    // Update knee angle display
+    kneeAngleElement.textContent = `${Math.round(kneeAngle)}°`;
+    
+    // Calculate knee angle percentage (for progress bar)
+    const kneePercentage = Math.min(100, Math.max(0, 
+        100 - Math.abs(kneeAngle - KNEE_ANGLE_THRESHOLD) / (KNEE_ANGLE_THRESHOLD / 2) * 100));
+    kneeProgressElement.style.width = `${kneePercentage}%`;
+    
+    // Update knee status text
+    if (isKneeAngleInRange(kneeAngle)) {
+        kneeStatusElement.textContent = 'Good Position';
+        kneeStatusElement.style.color = 'var(--success)';
+    } else {
+        kneeStatusElement.textContent = 'Adjust Position';
+        kneeStatusElement.style.color = 'var(--warning)';
+    }
+    }
+
+    // Update form quality score
+    function updateFormQuality(hipAngle, kneeAngle) {
+    // Calculate form quality based on correct angles
+    let hipQuality = 0;
+    let kneeQuality = 0;
+    
+    // Hip quality - how close to perfect up and down positions
+    if (isInUpPosition) {
+        hipQuality = 100 - Math.min(100, Math.abs(hipAngle - 180) * 2);
+    } else if (isInDownPosition) {
+        hipQuality = 100 - Math.min(100, Math.abs(hipAngle - HIP_ANGLE_DOWN_THRESHOLD) * 2);
+    }
+    
+    // Knee quality - how close to 90 degrees
+    kneeQuality = 100 - Math.min(100, Math.abs(kneeAngle - KNEE_ANGLE_THRESHOLD) * 1.5);
+    
+    // Calculate overall quality (weighted average)
+    const newQuality = Math.round((hipQuality * 0.6) + (kneeQuality * 0.4));
+    
+    // Smooth out changes in form quality
+    formQuality = Math.round(formQuality * 0.7 + newQuality * 0.3);
+    formValue.textContent = `${formQuality}%`;
+    
+    // Update color based on quality
+    if (formQuality >= 85) {
+        formValue.style.background = 'linear-gradient(45deg, var(--success), var(--primary))';
+    } else if (formQuality >= 70) {
+        formValue.style.background = 'linear-gradient(45deg, var(--primary), var(--secondary))';
+    } else {
+        formValue.style.background = 'linear-gradient(45deg, var(--warning), var(--primary))';
+    }
+    }
+
+    // Visual feedback for completed rep
+    function flashFeedback(type) {
+    const overlay = document.createElement('div');
+    overlay.style.position = 'absolute';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.borderRadius = '20px';
+    overlay.style.pointerEvents = 'none';
+    
+    if (type === 'success') {
+        overlay.style.backgroundColor = 'rgba(76, 201, 240, 0.3)';
+        overlay.style.border = '2px solid var(--success)';
+    } else {
+        overlay.style.backgroundColor = 'rgba(247, 37, 133, 0.3)';
+        overlay.style.border = '2px solid var(--warning)';
+    }
+    
+    document.querySelector('.canvas-container').appendChild(overlay);
+    
+    // Remove after animation
+    setTimeout(() => {
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity 0.5s ease';
+        setTimeout(() => {
+        overlay.remove();
+        }, 500);
+    }, 300);
+    }
+
+    // Get color for different keypoints
+    function getKeypointColor(name) {
+    // Color scheme for different body parts
+    if (name.includes('nose') || name.includes('eye') || name.includes('ear')) {
+        return 'rgba(255, 255, 255, 0.9)'; // Face - white
+    } else if (name.includes('shoulder') || name.includes('elbow') || name.includes('wrist')) {
+        return 'rgba(76, 201, 240, 0.9)'; // Arms - blue
+    } else if (name.includes('hip') || name.includes('knee') || name.includes('ankle')) {
+        return 'rgba(67, 97, 238, 0.9)'; // Legs - indigo
+    } else {
+        return 'rgba(247, 37, 133, 0.9)'; // Other - pink
+    }
+    }
+
+    // Check if a keypoint is important to label
+    function isImportantKeypoint(name) {
+    const important = ['shoulder', 'elbow', 'wrist', 'hip', 'knee', 'ankle'];
+    return important.some(part => name.includes(part));
+    }
+
+    // Format keypoint name for display
+    function formatKeypointName(name) {
+    // Remove side indicator and capitalize
+    return name.replace(/left_|right_/g, '').replace(/^\w/, c => c.toUpperCase());
+    }
+
+    // Initialize the app when page loads
+    window.addEventListener('DOMContentLoaded', init);

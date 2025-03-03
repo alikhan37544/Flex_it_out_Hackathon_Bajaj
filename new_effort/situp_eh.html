@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sit-Up Counter</title>
+  <!-- 
+    Using an inline style block for all styling. 
+    Go hard on the visuals to make it look amazing.
+  -->
+  <style>
+    /* Reset some default styles */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: linear-gradient(135deg, #333, #555);
+      font-family: Arial, sans-serif;
+      color: #eee;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 0.5em;
+      font-size: 2em;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: #ffeb3b;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+
+    .counter {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 1em 2em;
+      border-radius: 10px;
+      margin-bottom: 1em;
+      display: inline-block;
+      font-size: 1.5em;
+      position: relative;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% {transform: scale(1);}
+      50% {transform: scale(1.05);}
+      100% {transform: scale(1);}
+    }
+
+    #videoContainer {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      border: 2px solid #ffeb3b;
+      border-radius: 10px;
+      overflow: hidden;
+      background-color: #222;
+      box-shadow: 0px 0px 20px rgba(255,255,0,0.3);
+    }
+
+    #video {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1); /* Mirror the video for a typical "mirror" experience */
+    }
+
+    #outputCanvas {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      transform: scaleX(-1); /* Match the video mirror effect */
+    }
+
+    .status {
+      margin-top: 1em;
+      font-size: 1.2em;
+      color: #00e676; /* Green for "good" status */
+      transition: color 0.5s ease;
+    }
+
+    /* Fade in effect */
+    @keyframes fadeIn {
+      from {opacity: 0;}
+      to {opacity: 1;}
+    }
+
+    .fade-in {
+      animation: fadeIn 1s forwards;
+    }
+
+  </style>
+</head>
+<body>
+  <h1>Sit-Up Counter</h1>
+  
+  <!-- Display the number of sit-ups counted -->
+  <div class="counter" id="counter">Sit-ups: 0</div>
+
+  <!-- Container for video and annotation canvas -->
+  <div id="videoContainer">
+    <video id="video" playsinline></video>
+    <canvas id="outputCanvas"></canvas>
+  </div>
+
+  <!-- A status message below the camera feed -->
+  <div class="status fade-in" id="statusMsg">Initializing...</div>
+
+  <!-- 
+    1) Loading TensorFlow.js 
+    2) Loading MediaPipe Pose library 
+    3) We do everything else inline below.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@2.0.1/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4.1646424915/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    /********************************************************************
+     * Explanation of Approach:
+     * 
+     * - We use MediaPipe Pose to detect body landmarks.
+     * - We'll track the angle of the hip to the knee to the shoulder
+     *   or some relevant combination that helps identify a "sit-up".
+     * - We'll define thresholds that let us decide when the body is in
+     *   the "down" position and when it has come "up".
+     * - Each transition from "down" to "up" will increment the counter.
+     ********************************************************************/
+
+    const videoElement = document.getElementById('video');
+    const canvasElement = document.getElementById('outputCanvas');
+    const canvasCtx = canvasElement.getContext('2d');
+    const counterEl = document.getElementById('counter');
+    const statusEl = document.getElementById('statusMsg');
+
+    let sitUpCount = 0;
+    // We will track the "phase" of the movement: 
+    // e.g., have they gone down fully, and then come back up?
+    let isDownPosition = false;
+
+    // Utility to compute an angle between 3 points (in degrees).
+    // E.g. angle at B formed by A->B->C
+    function getAngle(A, B, C) {
+      const AB = { x: B.x - A.x, y: B.y - A.y };
+      const CB = { x: B.x - C.x, y: B.y - C.y };
+
+      const dot = (AB.x * CB.x + AB.y * CB.y); // dot product
+      const magAB = Math.sqrt(AB.x * AB.x + AB.y * AB.y);
+      const magCB = Math.sqrt(CB.x * CB.x + CB.y * CB.y);
+      const cosine = dot / (magAB * magCB);
+      
+      // convert to degrees
+      return Math.acos(cosine) * (180 / Math.PI);
+    }
+
+    /**
+     * onResults callback from MediaPipe Pose
+     * This is called every time we get a new set of pose landmarks.
+     */
+    function onResults(results) {
+      // Draw the mirrored video onto the canvas
+      canvasCtx.save();
+      canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+      canvasCtx.drawImage(
+        results.image, 0, 0, canvasElement.width, canvasElement.height
+      );
+
+      if (results.poseLandmarks) {
+        // Let's pull out some key landmarks:
+        // For sit-ups, we might focus on the hips, knees, shoulders.
+        const landmarks = results.poseLandmarks;
+
+        // Indices from MediaPipe's doc:
+        //  - leftHip: 23, rightHip: 24
+        //  - leftKnee: 25, rightKnee: 26
+        //  - leftShoulder: 11, rightShoulder: 12
+        const leftShoulder = landmarks[11];
+        const rightShoulder = landmarks[12];
+        const leftHip = landmarks[23];
+        const rightHip = landmarks[24];
+        const leftKnee = landmarks[25];
+        const rightKnee = landmarks[26];
+
+        // For a simpler approach, let's just use the right side (or left).
+        // We'll measure the angle formed at the hip by the shoulder->hip->knee.
+        // In a real scenario, you'd want to average left and right or track both.
+        let shoulder = rightShoulder;
+        let hip = rightHip;
+        let knee = rightKnee;
+
+        // Convert from normalized coords to actual pixel coords for angle calc
+        const s = { x: shoulder.x * canvasElement.width, y: shoulder.y * canvasElement.height };
+        const h = { x: hip.x * canvasElement.width,     y: hip.y * canvasElement.height };
+        const k = { x: knee.x * canvasElement.width,    y: knee.y * canvasElement.height };
+
+        const angle = getAngle(s, h, k);
+
+        // Visual feedback:
+        statusEl.textContent = `Angle at hip: ${angle.toFixed(1)}°`;
+
+        // Let's define typical thresholds for a sit-up. This can vary, but:
+        //   - "Down" position angle might be > 160° (lying down).
+        //   - "Up" position angle might be < 100° (sitting up).
+        // Adjust as needed for your scenario/camera angles, etc.
+
+        if (angle > 150) {
+          // Person is more "flat"
+          isDownPosition = true; 
+        }
+
+        if (isDownPosition && angle < 100) {
+          // Person has come up from the down position
+          sitUpCount += 1;
+          counterEl.textContent = `Sit-ups: ${sitUpCount}`;
+          isDownPosition = false;
+        }
+
+        // Draw the landmarks and connections for an annotated skeleton
+        drawSkeleton(landmarks, results.poseWorldLandmarks);
+      }
+
+      canvasCtx.restore();
+    }
+
+    /**
+     * drawSkeleton function
+     * Draws the landmark points and the lines connecting them.
+     */
+    function drawSkeleton(landmarks) {
+      // A simple connection map for drawing lines between key landmarks.
+      const connections = [
+        // Upper body connections (examples)
+        [11, 13], [13, 15], // Right arm
+        [12, 14], [14, 16], // Left arm
+        [11, 12],          // Shoulders
+        [11, 23], [12, 24], // Spine
+        // Lower body
+        [23, 25], [25, 27], [24, 26], [26, 28],
+        [25, 26],          // Hips
+      ];
+
+      // Draw circles at each landmark
+      for (let i = 0; i < landmarks.length; i++) {
+        const x = landmarks[i].x * canvasElement.width;
+        const y = landmarks[i].y * canvasElement.height;
+
+        canvasCtx.beginPath();
+        canvasCtx.arc(x, y, 5, 0, 2 * Math.PI);
+        canvasCtx.fillStyle = '#00E676';
+        canvasCtx.fill();
+      }
+
+      // Draw lines for connections
+      canvasCtx.lineWidth = 2;
+      canvasCtx.strokeStyle = '#ffeb3b';
+      connections.forEach(pair => {
+        const [start, end] = pair;
+        if (landmarks[start] && landmarks[end]) {
+          canvasCtx.beginPath();
+          canvasCtx.moveTo(
+            landmarks[start].x * canvasElement.width,
+            landmarks[start].y * canvasElement.height
+          );
+          canvasCtx.lineTo(
+            landmarks[end].x * canvasElement.width,
+            landmarks[end].y * canvasElement.height
+          );
+          canvasCtx.stroke();
+        }
+      });
+    }
+
+    /**************************************
+     * Initialize MediaPipe Pose Solution
+     **************************************/
+    const pose = new Pose({
+      locateFile: (file) => {
+        // By default, it looks relative to the current js file location
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.4.1646424915/${file}`;
+      }
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      smoothSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    pose.onResults(onResults);
+
+    // Use the camera_utils to pass video frames into the Pose solution
+    const camera = new Camera(videoElement, {
+      onFrame: async () => {
+        await pose.send({ image: videoElement });
+      },
+      width: 640,
+      height: 480
+    });
+
+    // Start video/camera
+    camera.start().then(() => {
+      statusEl.textContent = "Camera started. Perform sit-ups!";
+    }).catch(err => {
+      statusEl.textContent = "Error accessing camera: " + err;
+      console.error(err);
+    });
+
+  </script>
+</body>
+</html>

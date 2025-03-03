@@ -1,5 +1,5 @@
-Metadata-Version: 2.1
-Name: motion-detector
+Metadata-Version: 2.2
+Name: motion_detector
 Version: 0.1
 Summary: A motion detector module for hand gestures
 Home-page: https://github.com/yourusername/motion_detector
@@ -10,3 +10,14 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.6
 Description-Content-Type: text/markdown
+Requires-Dist: opencv-python
+Requires-Dist: mediapipe
+Requires-Dist: numpy
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
